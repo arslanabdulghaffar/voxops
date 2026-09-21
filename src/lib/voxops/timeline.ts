@@ -2,6 +2,7 @@ export type TimelineEventType =
   | "incident"
   | "investigation"
   | "proposal"
+  | "safety"
   | "approval"
   | "execution"
   | "verification";

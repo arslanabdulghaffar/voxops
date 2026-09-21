@@ -1,6 +1,8 @@
-import type {
-  Incident,
-  Service,
+import {
+  incidentScenarios,
+  type Incident,
+  type IncidentScenario,
+  type Service,
 } from "@/lib/voxops/scenarios";
 
 export type IncidentToolContext = {
@@ -29,17 +31,21 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "investigate_incident",
+
     description:
-      "MANDATORY first tool whenever the engineer asks to investigate, diagnose, analyze, explain, or determine what is happening in an incident. It gathers metrics, logs, deployment history, and dependency health in one investigation.",
+      "MANDATORY first tool whenever the engineer asks to investigate, diagnose, analyze, explain, or determine what is happening in an incident. It gathers metrics, logs, deployment history, dependency health, and an evidence-based diagnosis.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
           description:
-            "Affected production service explicitly mentioned by the engineer, for example Checkout API.",
+            "Affected production service explicitly mentioned by the engineer.",
         },
       },
+
       required: ["service"],
     },
   },
@@ -47,22 +53,27 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "request_rollback",
+
     description:
-      "MANDATORY tool when the engineer asks to rollback a service. This DOES NOT execute the rollback. It creates a recovery proposal that must pass the human Safety Gate.",
+      "MANDATORY tool whenever the engineer asks to rollback a service. The tool validates whether evidence supports rollback. It NEVER executes the rollback. A validated proposal must still pass the human Safety Gate.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
           description:
-            "Production service to rollback.",
+            "Production service requested for rollback.",
         },
+
         target_version: {
           type: "string",
           description:
-            "Requested stable target version.",
+            "Requested rollback target version.",
         },
       },
+
       required: [
         "service",
         "target_version",
@@ -73,10 +84,13 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "get_service_metrics",
+
     description:
-      "Get current health, latency, error rate, version, and status for one service. Use for a specific follow-up metrics question.",
+      "Get current health, latency, error rate, version, and status for one service.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
@@ -84,6 +98,7 @@ export const incidentToolDefinitions = [
             "Production service name.",
         },
       },
+
       required: ["service"],
     },
   },
@@ -91,10 +106,13 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "query_service_logs",
+
     description:
-      "Inspect recent logs for one service. Use for a specific follow-up question about logs.",
+      "Inspect recent logs for one production service.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
@@ -102,6 +120,7 @@ export const incidentToolDefinitions = [
             "Production service name.",
         },
       },
+
       required: ["service"],
     },
   },
@@ -109,10 +128,13 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "get_recent_deployments",
+
     description:
       "Inspect recent deployment history for one production service.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
@@ -120,6 +142,7 @@ export const incidentToolDefinitions = [
             "Production service name.",
         },
       },
+
       required: ["service"],
     },
   },
@@ -127,10 +150,13 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "get_dependency_health",
+
     description:
-      "Inspect surrounding dependency health for one production service.",
+      "Inspect dependency and upstream-service health surrounding one production service.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
@@ -138,6 +164,7 @@ export const incidentToolDefinitions = [
             "Production service name.",
         },
       },
+
       required: ["service"],
     },
   },
@@ -145,10 +172,13 @@ export const incidentToolDefinitions = [
   {
     type: "function",
     name: "verify_recovery",
+
     description:
-      "MANDATORY tool when the engineer asks to verify whether recovery or rollback succeeded. It checks the service's current status, latency, error rate, and version.",
+      "MANDATORY tool whenever the engineer asks whether a recovery or rollback succeeded. It checks the current service health, error rate, latency, and version.",
+
     parameters: {
       type: "object",
+
       properties: {
         service: {
           type: "string",
@@ -156,6 +186,7 @@ export const incidentToolDefinitions = [
             "Production service whose recovery should be verified.",
         },
       },
+
       required: ["service"],
     },
   },
@@ -171,22 +202,42 @@ function findService(
   requestedService: string,
   services: Service[]
 ) {
-  const requested = normalize(
-    requestedService
+  const requested =
+    normalize(requestedService);
+
+  return services.find(
+    (service) => {
+      const id =
+        normalize(service.id);
+
+      const name =
+        normalize(service.name);
+
+      return (
+        requested === id ||
+        requested === name ||
+        requested.includes(id) ||
+        name.includes(requested) ||
+        id.includes(requested)
+      );
+    }
   );
+}
 
-  return services.find((service) => {
-    const id = normalize(service.id);
-    const name = normalize(service.name);
+function findScenario(
+  incident: Incident | null
+): IncidentScenario | null {
+  if (!incident) {
+    return null;
+  }
 
-    return (
-      requested === id ||
-      requested === name ||
-      requested.includes(id) ||
-      name.includes(requested) ||
-      id.includes(requested)
-    );
-  });
+  return (
+    incidentScenarios.find(
+      (scenario) =>
+        scenario.incident.id ===
+        incident.id
+    ) ?? null
+  );
 }
 
 function serviceNotFound(
@@ -194,8 +245,12 @@ function serviceNotFound(
 ): IncidentToolResult {
   return {
     ok: false,
-    summary: `Service "${serviceName}" was not found.`,
-    error: "SERVICE_NOT_FOUND",
+
+    summary:
+      `Service "${serviceName}" was not found.`,
+
+    error:
+      "SERVICE_NOT_FOUND",
   };
 }
 
@@ -212,10 +267,18 @@ function getMetrics(
       `version ${service.version}.`,
 
     data: {
-      service: service.name,
-      status: service.status,
-      version: service.version,
-      latency_ms: service.latency,
+      service:
+        service.name,
+
+      status:
+        service.status,
+
+      version:
+        service.version,
+
+      latency_ms:
+        service.latency,
+
       error_rate_percent:
         service.errorRate,
     },
@@ -224,48 +287,29 @@ function getMetrics(
 
 function getLogs(
   service: Service,
-  incident: Incident | null
+  scenario: IncidentScenario | null
 ): IncidentToolResult {
   if (
-    service.id === "checkout" &&
-    incident
+    scenario &&
+    service.id ===
+      scenario.affectedServiceId
   ) {
     return {
       ok: true,
 
       summary:
-        "Checkout API logs show repeated PriceNormalizer failures beginning shortly after deployment v2.14.",
+        scenario.investigation.logs.summary,
 
       data: {
-        service: service.name,
+        service:
+          service.name,
 
-        logs: [
-          {
-            level: "ERROR",
-            occurrences: 214,
-            message:
-              "PriceNormalizer failed: currency is undefined",
-            first_seen:
-              "2 minutes after deployment v2.14",
-          },
-
-          {
-            level: "ERROR",
-            occurrences: 198,
-            message:
-              "POST /checkout returned HTTP 500",
-          },
-
-          {
-            level: "WARN",
-            occurrences: 43,
-            message:
-              "Checkout request failed before payment processing",
-          },
-        ],
+        logs:
+          scenario.investigation.logs.entries,
 
         observation:
-          "Failures occur inside Checkout API before requests reach Payment API.",
+          scenario.investigation.logs
+            .observation,
       },
     };
   }
@@ -274,14 +318,16 @@ function getLogs(
     ok: true,
 
     summary:
-      `${service.name} has no significant recent errors.`,
+      `${service.name} has no significant incident-correlated errors.`,
 
     data: {
-      service: service.name,
+      service:
+        service.name,
 
       logs: [
         {
           level: "INFO",
+
           message:
             "Requests processing normally",
         },
@@ -292,40 +338,27 @@ function getLogs(
 
 function getDeployments(
   service: Service,
-  incident: Incident | null
+  scenario: IncidentScenario | null
 ): IncidentToolResult {
   if (
-    service.id === "checkout" &&
-    incident
+    scenario &&
+    service.id ===
+      scenario.affectedServiceId
   ) {
     return {
       ok: true,
 
       summary:
-        "Checkout API v2.14 was deployed 7 minutes before the incident. v2.13 was the previous stable version.",
+        scenario.investigation
+          .deployments.summary,
 
       data: {
-        service: service.name,
+        service:
+          service.name,
 
-        deployments: [
-          {
-            version: "v2.14",
-            state: "current",
-            deployed:
-              "7 minutes before incident",
-            change:
-              "Pricing normalization refactor",
-          },
-
-          {
-            version: "v2.13",
-            state: "previous_stable",
-            deployed:
-              "2 days before incident",
-            change:
-              "Stable production release",
-          },
-        ],
+        deployments:
+          scenario.investigation
+            .deployments.entries,
       },
     };
   }
@@ -337,7 +370,8 @@ function getDeployments(
       `${service.name} has no deployment correlated with the current incident.`,
 
     data: {
-      service: service.name,
+      service:
+        service.name,
 
       deployments: [
         {
@@ -357,27 +391,54 @@ function getDeployments(
 
 function getDependencies(
   service: Service,
-  services: Service[]
+  services: Service[],
+  scenario: IncidentScenario | null
 ): IncidentToolResult {
+  if (
+    scenario &&
+    service.id ===
+      scenario.affectedServiceId
+  ) {
+    return {
+      ok: true,
+
+      summary:
+        scenario.investigation
+          .dependencies.summary,
+
+      data: {
+        investigated_service:
+          service.name,
+
+        dependencies:
+          scenario.investigation
+            .dependencies.entries,
+      },
+    };
+  }
+
   const dependencies =
     services
       .filter(
         (candidate) =>
-          candidate.id !== service.id
+          candidate.id !==
+          service.id
       )
-      .map((candidate) => ({
-        service:
-          candidate.name,
+      .map(
+        (candidate) => ({
+          service:
+            candidate.name,
 
-        status:
-          candidate.status,
+          status:
+            candidate.status,
 
-        error_rate_percent:
-          candidate.errorRate,
+          error_rate_percent:
+            candidate.errorRate,
 
-        latency_ms:
-          candidate.latency,
-      }));
+          latency_ms:
+            candidate.latency,
+        })
+      );
 
   const unhealthy =
     dependencies.filter(
@@ -391,8 +452,8 @@ function getDependencies(
 
     summary:
       unhealthy.length === 0
-        ? `Dependencies surrounding ${service.name} are healthy, indicating the failure is localized to ${service.name}.`
-        : `${unhealthy.length} unhealthy dependencies detected.`,
+        ? `Dependencies surrounding ${service.name} are healthy.`
+        : `${unhealthy.length} unhealthy dependencies detected around ${service.name}.`,
 
     data: {
       investigated_service:
@@ -406,20 +467,333 @@ function getDependencies(
   };
 }
 
+function investigateIncident(
+  service: Service,
+  context: IncidentToolContext,
+  scenario: IncidentScenario | null
+): IncidentToolResult {
+  const metrics =
+    getMetrics(service);
+
+  const logs =
+    getLogs(
+      service,
+      scenario
+    );
+
+  const deployments =
+    getDeployments(
+      service,
+      scenario
+    );
+
+  const dependencies =
+    getDependencies(
+      service,
+      context.services,
+      scenario
+    );
+
+  if (
+    !context.incident ||
+    !scenario
+  ) {
+    return {
+      ok: true,
+
+      summary:
+        `Investigation completed for ${service.name}. No active incident is associated with this service.`,
+
+      data: {
+        investigation_type:
+          "full_incident_investigation",
+
+        service:
+          service.name,
+
+        metrics:
+          metrics.data,
+
+        logs:
+          logs.data,
+
+        deployments:
+          deployments.data,
+
+        dependencies:
+          dependencies.data,
+
+        diagnosis: {
+          confidence:
+            "low",
+
+          likely_cause:
+            "No active incident",
+        },
+      },
+    };
+  }
+
+  if (
+    service.id !==
+    scenario.affectedServiceId
+  ) {
+    return {
+      ok: true,
+
+      summary:
+        `Investigation completed for ${service.name}. Current incident evidence does not identify ${service.name} as the affected service.`,
+
+      data: {
+        investigation_type:
+          "full_incident_investigation",
+
+        service:
+          service.name,
+
+        metrics:
+          metrics.data,
+
+        logs:
+          logs.data,
+
+        deployments:
+          deployments.data,
+
+        dependencies:
+          dependencies.data,
+
+        diagnosis: {
+          confidence:
+            "low",
+
+          likely_cause:
+            "No incident-correlated failure identified for this service.",
+
+          recommended_action:
+            `Investigate ${context.incident.service}, which is the service associated with the active incident.`,
+        },
+      },
+    };
+  }
+
+  return {
+    ok: true,
+
+    summary:
+      `Investigation completed. ${scenario.investigation.diagnosis.likely_cause} is the leading diagnosis with ${scenario.investigation.diagnosis.confidence} confidence.`,
+
+    data: {
+      investigation_type:
+        "full_incident_investigation",
+
+      scenario:
+        scenario.id,
+
+      service:
+        service.name,
+
+      metrics:
+        metrics.data,
+
+      logs:
+        logs.data,
+
+      deployments:
+        deployments.data,
+
+      dependencies:
+        dependencies.data,
+
+      diagnosis:
+        scenario.investigation
+          .diagnosis,
+    },
+  };
+}
+
+function requestRollback(
+  service: Service,
+  args: Record<string, unknown>,
+  context: IncidentToolContext,
+  scenario: IncidentScenario | null
+): IncidentToolResult {
+  if (
+    !context.incident ||
+    !scenario
+  ) {
+    return {
+      ok: false,
+
+      summary:
+        "Rollback blocked. There is no active incident with evidence supporting a recovery action.",
+
+      error:
+        "NO_ACTIVE_INCIDENT",
+
+      data: {
+        safety_blocked:
+          true,
+      },
+    };
+  }
+
+  const targetVersion =
+    typeof args.target_version ===
+    "string"
+      ? args.target_version
+      : "";
+
+  const policy =
+    scenario.rollbackPolicy;
+
+  /*
+   * Important safety case:
+   *
+   * Some incidents should NOT be
+   * fixed by rollback.
+   */
+  if (!policy) {
+    return {
+      ok: false,
+
+      summary:
+        `Rollback blocked by VoxOps safety policy. Evidence does not validate a rollback of ${service.name}. ${scenario.investigation.diagnosis.recommended_action}`,
+
+      error:
+        "ROLLBACK_NOT_VALIDATED",
+
+      data: {
+        safety_blocked:
+          true,
+
+        service:
+          service.name,
+
+        diagnosis:
+          scenario.investigation
+            .diagnosis.likely_cause,
+
+        recommended_action:
+          scenario.investigation
+            .diagnosis
+            .recommended_action,
+      },
+    };
+  }
+
+  /*
+   * A rollback may be supported for
+   * the incident, but only for the
+   * evidence-backed affected service.
+   */
+  if (
+    service.id !==
+    policy.serviceId
+  ) {
+    return {
+      ok: false,
+
+      summary:
+        `Rollback blocked. The current incident only validates rollback for ${context.incident.service}, not ${service.name}.`,
+
+      error:
+        "ROLLBACK_NOT_VALIDATED",
+
+      data: {
+        safety_blocked:
+          true,
+
+        requested_service:
+          service.name,
+
+        validated_service:
+          context.incident.service,
+      },
+    };
+  }
+
+  if (
+    targetVersion !==
+    policy.targetVersion
+  ) {
+    return {
+      ok: false,
+
+      summary:
+        `Rollback blocked. The evidence-backed stable target for ${service.name} is ${policy.targetVersion}, not ${targetVersion}.`,
+
+      error:
+        "INVALID_TARGET_VERSION",
+
+      data: {
+        safety_blocked:
+          true,
+
+        requested_target:
+          targetVersion,
+
+        validated_target:
+          policy.targetVersion,
+      },
+    };
+  }
+
+  const proposal:
+    RecoveryProposal = {
+      action:
+        "rollback",
+
+      service:
+        service.name,
+
+      serviceId:
+        service.id,
+
+      fromVersion:
+        service.version,
+
+      toVersion:
+        policy.targetVersion,
+
+      reason:
+        policy.reason,
+
+      evidence:
+        policy.evidence,
+    };
+
+  return {
+    ok: true,
+
+    summary:
+      `Rollback proposal created for ${service.name}. Human approval through the VoxOps Safety Gate is required before execution.`,
+
+    data: {
+      state:
+        "AWAITING_HUMAN_APPROVAL",
+
+      proposal,
+    },
+  };
+}
+
 export function runIncidentTool(
   name: string,
   args: Record<string, unknown>,
   context: IncidentToolContext
 ): IncidentToolResult {
   const requestedService =
-    typeof args.service === "string"
+    typeof args.service ===
+    "string"
       ? args.service
       : "";
 
-  const service = findService(
-    requestedService,
-    context.services
-  );
+  const service =
+    findService(
+      requestedService,
+      context.services
+    );
 
   if (!service) {
     return serviceNotFound(
@@ -427,181 +801,26 @@ export function runIncidentTool(
     );
   }
 
+  const scenario =
+    findScenario(
+      context.incident
+    );
+
   switch (name) {
-    case "investigate_incident": {
-      const metrics =
-        getMetrics(service);
+    case "investigate_incident":
+      return investigateIncident(
+        service,
+        context,
+        scenario
+      );
 
-      const logs =
-        getLogs(
-          service,
-          context.incident
-        );
-
-      const deployments =
-        getDeployments(
-          service,
-          context.incident
-        );
-
-      const dependencies =
-        getDependencies(
-          service,
-          context.services
-        );
-
-      const checkoutRegression =
-        service.id === "checkout" &&
-        context.incident !== null;
-
-      return {
-        ok: true,
-
-        summary:
-          checkoutRegression
-            ? "Investigation completed. Evidence strongly indicates a regression introduced by Checkout API deployment v2.14, specifically around PriceNormalizer. Dependencies are healthy."
-            : `Investigation completed for ${service.name}. No deployment-correlated failure was identified.`,
-
-        data: {
-          investigation_type:
-            "full_incident_investigation",
-
-          service:
-            service.name,
-
-          metrics:
-            metrics.data,
-
-          logs:
-            logs.data,
-
-          deployments:
-            deployments.data,
-
-          dependencies:
-            dependencies.data,
-
-          diagnosis:
-            checkoutRegression
-              ? {
-                  confidence:
-                    "high",
-
-                  likely_cause:
-                    "Checkout API v2.14 pricing normalization regression",
-
-                  evidence: [
-                    "Error rate increased to 27.3%.",
-                    "Latency increased to 1480 ms.",
-                    "v2.14 deployed 7 minutes before incident.",
-                    "PriceNormalizer errors began after v2.14.",
-                    "Payment, Auth, and Inventory remain healthy.",
-                    "Failures occur before payment processing.",
-                  ],
-
-                  recommended_action:
-                    "Rollback Checkout API from v2.14 to previous stable version v2.13, subject to Safety Gate authorization.",
-                }
-              : {
-                  confidence:
-                    "low",
-
-                  likely_cause:
-                    "Not established",
-                },
-        },
-      };
-    }
-
-    case "request_rollback": {
-      if (!context.incident) {
-        return {
-          ok: false,
-
-          summary:
-            "No active incident exists, so rollback authorization cannot be created.",
-
-          error:
-            "NO_ACTIVE_INCIDENT",
-        };
-      }
-
-      const targetVersion =
-        typeof args.target_version ===
-        "string"
-          ? args.target_version
-          : "";
-
-      if (
-        service.id !== "checkout"
-      ) {
-        return {
-          ok: false,
-
-          summary:
-            `No validated rollback recommendation currently exists for ${service.name}.`,
-
-          error:
-            "ROLLBACK_NOT_VALIDATED",
-        };
-      }
-
-      if (
-        targetVersion !== "v2.13"
-      ) {
-        return {
-          ok: false,
-
-          summary:
-            `The validated stable target for Checkout API is v2.13, not ${targetVersion}.`,
-
-          error:
-            "INVALID_TARGET_VERSION",
-        };
-      }
-
-      const proposal: RecoveryProposal = {
-        action:
-          "rollback",
-
-        service:
-          service.name,
-
-        serviceId:
-          service.id,
-
-        fromVersion:
-          service.version,
-
-        toVersion:
-          "v2.13",
-
-        reason:
-          "Evidence indicates that the current Checkout API v2.14 deployment introduced a pricing normalization regression.",
-
-        evidence: [
-          "Checkout API error rate reached 27.3%.",
-          "Checkout API latency reached 1480 ms.",
-          "v2.14 was deployed 7 minutes before the incident.",
-          "PriceNormalizer failures began after v2.14.",
-          "Payment, Auth, and Inventory services remain healthy.",
-        ],
-      };
-
-      return {
-        ok: true,
-
-        summary:
-          "Rollback proposal created. Human approval through the VoxOps Safety Gate is required before execution.",
-
-        data: {
-          state:
-            "AWAITING_HUMAN_APPROVAL",
-
-          proposal,
-        },
-      };
-    }
+    case "request_rollback":
+      return requestRollback(
+        service,
+        args,
+        context,
+        scenario
+      );
 
     case "get_service_metrics":
       return getMetrics(
@@ -611,19 +830,20 @@ export function runIncidentTool(
     case "query_service_logs":
       return getLogs(
         service,
-        context.incident
+        scenario
       );
 
     case "get_recent_deployments":
       return getDeployments(
         service,
-        context.incident
+        scenario
       );
 
     case "get_dependency_health":
       return getDependencies(
         service,
-        context.services
+        context.services,
+        scenario
       );
 
     case "verify_recovery": {

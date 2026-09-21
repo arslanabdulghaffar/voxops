@@ -28,6 +28,8 @@ function getLabel(type: TimelineEventType) {
 
     case "verification":
       return "Verification";
+    case "safety":
+      return "Safety";
   }
 }
 

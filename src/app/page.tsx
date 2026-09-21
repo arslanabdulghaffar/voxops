@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useState,
+} from "react";
 
 import VoiceAgentPanel from "@/components/VoiceAgentPanel";
 import SafetyGate from "@/components/SafetyGate";
@@ -8,11 +10,12 @@ import IncidentTimeline from "@/components/IncidentTimeline";
 import PostmortemReport from "@/components/PostmortemReport";
 
 import {
-  checkoutFailureServices,
-  checkoutIncident,
+  getIncidentScenario,
   healthyServices,
-  recoveredServices,
+  incidentScenarios,
   type Incident,
+  type IncidentScenario,
+  type ScenarioId,
   type Service,
 } from "@/lib/voxops/scenarios";
 
@@ -34,12 +37,34 @@ type RecoveryStatus =
   | "rejected";
 
 export default function Home() {
-  const [services, setServices] =
+  const [
+    selectedScenarioId,
+    setSelectedScenarioId,
+  ] =
+    useState<ScenarioId>(
+      "checkout-regression"
+    );
+
+  const [
+    activeScenario,
+    setActiveScenario,
+  ] =
+    useState<IncidentScenario | null>(
+      null
+    );
+
+  const [
+    services,
+    setServices,
+  ] =
     useState<Service[]>(
       healthyServices
     );
 
-  const [incident, setIncident] =
+  const [
+    incident,
+    setIncident,
+  ] =
     useState<Incident | null>(
       null
     );
@@ -63,7 +88,8 @@ export default function Home() {
   const [
     recoveryVerified,
     setRecoveryVerified,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   const [
     timeline,
@@ -71,6 +97,11 @@ export default function Home() {
   ] =
     useState<TimelineEvent[]>(
       []
+    );
+
+  const selectedScenario =
+    getIncidentScenario(
+      selectedScenarioId
     );
 
   function createTimelineEvent(
@@ -83,7 +114,9 @@ export default function Home() {
         crypto.randomUUID(),
 
       type,
+
       title,
+
       detail,
 
       timestamp:
@@ -96,36 +129,39 @@ export default function Home() {
     title: string,
     detail: string
   ) {
-    const event =
-      createTimelineEvent(
-        type,
-        title,
-        detail
-      );
-
     setTimeline(
       (current) => [
         ...current,
-        event,
+
+        createTimelineEvent(
+          type,
+          title,
+          detail
+        ),
       ]
     );
   }
 
-  const triggerIncident = () => {
-    setServices(
-      checkoutFailureServices
+  function triggerIncident() {
+    const scenario =
+      getIncidentScenario(
+        selectedScenarioId
+      );
+
+    setActiveScenario(
+      scenario
     );
 
-    const newIncident = {
-      ...checkoutIncident,
+    setServices(
+      scenario.failureServices
+    );
+
+    setIncident({
+      ...scenario.incident,
 
       startedAt:
         new Date().toISOString(),
-    };
-
-    setIncident(
-      newIncident
-    );
+    });
 
     setRecoveryProposal(
       null
@@ -142,18 +178,24 @@ export default function Home() {
     setTimeline([
       createTimelineEvent(
         "incident",
-        "SEV-1 incident detected",
-        "Checkout API error rate increased to 27.3% and latency reached 1480 ms."
+
+        `${scenario.incident.severity} incident detected`,
+
+        `${scenario.incident.service}: ${scenario.incident.summary}`
       ),
     ]);
-  };
+  }
 
-  const resetSystem = () => {
+  function resetSystem() {
     setServices(
       healthyServices
     );
 
     setIncident(null);
+
+    setActiveScenario(
+      null
+    );
 
     setRecoveryProposal(
       null
@@ -168,11 +210,11 @@ export default function Home() {
     );
 
     setTimeline([]);
-  };
+  }
 
-  const handleRecoveryProposal = (
+  function handleRecoveryProposal(
     proposal: RecoveryProposal
-  ) => {
+  ) {
     setRecoveryProposal(
       proposal
     );
@@ -180,12 +222,34 @@ export default function Home() {
     setRecoveryStatus(
       "pending"
     );
-  };
+  }
 
-  const handleToolExecuted = (
+  function handleToolExecuted(
     name: string,
     result: IncidentToolResult
-  ) => {
+  ) {
+    /*
+     * A rejected rollback request is
+     * intentionally part of our audit
+     * trail. This demonstrates that
+     * VoxOps can block an unsafe action.
+     */
+    if (
+      name ===
+        "request_rollback" &&
+      !result.ok
+    ) {
+      addTimelineEvent(
+        "safety",
+
+        "Unsafe rollback blocked",
+
+        result.summary
+      );
+
+      return;
+    }
+
     if (!result.ok) {
       return;
     }
@@ -196,7 +260,9 @@ export default function Home() {
     ) {
       addTimelineEvent(
         "investigation",
+
         "Evidence-based investigation completed",
+
         result.summary
       );
 
@@ -209,7 +275,9 @@ export default function Home() {
     ) {
       addTimelineEvent(
         "proposal",
+
         "Rollback proposed",
+
         result.summary
       );
 
@@ -236,17 +304,36 @@ export default function Home() {
 
         addTimelineEvent(
           "verification",
+
           "Recovery verified",
+
           result.summary
         );
       }
     }
-  };
+  }
 
-  const approveRecovery = () => {
+  function approveRecovery() {
     if (
-      !recoveryProposal
+      !recoveryProposal ||
+      !activeScenario
     ) {
+      return;
+    }
+
+    const recoveredServices =
+      activeScenario
+        .recoveredServices;
+
+    if (!recoveredServices) {
+      addTimelineEvent(
+        "safety",
+
+        "Recovery execution blocked",
+
+        "The active scenario does not define an evidence-backed rollback recovery state."
+      );
+
       return;
     }
 
@@ -256,7 +343,9 @@ export default function Home() {
 
     addTimelineEvent(
       "approval",
+
       "Rollback authorized by human operator",
+
       `${recoveryProposal.service} rollback from ${recoveryProposal.fromVersion} to ${recoveryProposal.toVersion} was explicitly approved through the VoxOps Safety Gate.`
     );
 
@@ -265,7 +354,9 @@ export default function Home() {
         recoveredServices
       );
 
-      setIncident(null);
+      setIncident(
+        null
+      );
 
       setRecoveryStatus(
         "completed"
@@ -273,23 +364,27 @@ export default function Home() {
 
       addTimelineEvent(
         "execution",
+
         "Rollback completed",
+
         `${recoveryProposal.service} was rolled back from ${recoveryProposal.fromVersion} to ${recoveryProposal.toVersion}.`
       );
     }, 1200);
-  };
+  }
 
-  const rejectRecovery = () => {
+  function rejectRecovery() {
     setRecoveryStatus(
       "rejected"
     );
 
     addTimelineEvent(
       "approval",
+
       "Rollback rejected",
+
       "The human operator rejected the proposed recovery action. No production state was changed."
     );
-  };
+  }
 
   const criticalCount =
     services.filter(
@@ -309,6 +404,13 @@ export default function Home() {
     criticalCount === 0 &&
     degradedCount === 0;
 
+  const scenarioLocked =
+    incident !== null ||
+    recoveryStatus ===
+      "pending" ||
+    recoveryStatus ===
+      "executing";
+
   return (
     <main className="min-h-screen bg-[#07090d] text-white">
 
@@ -323,7 +425,6 @@ export default function Home() {
             </div>
 
             <div>
-
               <h1 className="text-2xl font-semibold">
                 VoxOps
               </h1>
@@ -331,7 +432,6 @@ export default function Home() {
               <p className="text-sm text-gray-400">
                 AI Voice Incident Commander
               </p>
-
             </div>
 
           </div>
@@ -408,45 +508,40 @@ export default function Home() {
 
         </section>
 
-        <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <ScenarioSelector
+          selectedScenarioId={
+            selectedScenarioId
+          }
+          scenario={
+            selectedScenario
+          }
+          locked={
+            scenarioLocked
+          }
+          onChange={
+            setSelectedScenarioId
+          }
+          onTrigger={
+            triggerIncident
+          }
+          onReset={
+            resetSystem
+          }
+        />
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
 
           <section>
 
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-4">
 
-              <div>
+              <h2 className="text-lg font-semibold">
+                Production Services
+              </h2>
 
-                <h2 className="text-lg font-semibold">
-                  Production Services
-                </h2>
-
-                <p className="text-sm text-gray-500">
-                  Live simulated infrastructure
-                </p>
-
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-
-                <button
-                  onClick={
-                    resetSystem
-                  }
-                  className="rounded-lg border border-white/10 px-4 py-2 text-sm text-gray-300 transition hover:bg-white/5"
-                >
-                  Reset
-                </button>
-
-                <button
-                  onClick={
-                    triggerIncident
-                  }
-                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium transition hover:bg-red-500"
-                >
-                  Trigger Demo Incident
-                </button>
-
-              </div>
+              <p className="text-sm text-gray-500">
+                Live simulated infrastructure
+              </p>
 
             </div>
 
@@ -492,7 +587,7 @@ export default function Home() {
                     ? recoveryVerified
                       ? "Recovery completed and independently verified by VoxOps."
                       : "Recovery completed. Ask VoxOps to verify the restored service."
-                    : "Trigger the demo incident to simulate a production failure."}
+                    : "Choose a scenario above and trigger a production incident."}
                 </p>
 
                 {recoveryStatus ===
@@ -578,8 +673,7 @@ export default function Home() {
 
                           <span className="mr-2 text-violet-400">
                             {String(
-                              index +
-                                1
+                              index + 1
                             ).padStart(
                               2,
                               "0"
@@ -602,7 +696,7 @@ export default function Home() {
                   </p>
 
                   <p className="mt-2 text-sm text-gray-300">
-                    Voice investigation is available below. Recovery actions require Safety Gate authorization.
+                    Voice investigation is available below. Recovery actions are validated against incident evidence before the human Safety Gate can open.
                   </p>
 
                 </div>
@@ -654,10 +748,14 @@ export default function Home() {
 
           <PostmortemReport
             incidentId={
-              checkoutIncident.id
+              activeScenario
+                ?.incident.id ??
+              "Pending"
             }
             severity={
-              checkoutIncident.severity
+              activeScenario
+                ?.incident.severity ??
+              "—"
             }
             proposal={
               recoveryProposal
@@ -678,6 +776,136 @@ export default function Home() {
       </div>
 
     </main>
+  );
+}
+
+function ScenarioSelector({
+  selectedScenarioId,
+  scenario,
+  locked,
+  onChange,
+  onTrigger,
+  onReset,
+}: {
+  selectedScenarioId: ScenarioId;
+  scenario: IncidentScenario;
+  locked: boolean;
+
+  onChange: (
+    id: ScenarioId
+  ) => void;
+
+  onTrigger: () => void;
+
+  onReset: () => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-violet-500/15 bg-violet-500/[0.03] p-5">
+
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+
+        <div className="max-w-3xl">
+
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-violet-400">
+            Demo Scenario
+          </p>
+
+          <h2 className="mt-2 text-lg font-semibold">
+            Incident Scenario Engine
+          </h2>
+
+          <p className="mt-1 text-sm leading-6 text-gray-500">
+            Choose a different incident to demonstrate evidence-based diagnosis and safety-aware recovery.
+          </p>
+
+          <div className="mt-4">
+
+            <select
+              value={
+                selectedScenarioId
+              }
+              disabled={
+                locked
+              }
+              onChange={
+                (event) =>
+                  onChange(
+                    event.target
+                      .value as ScenarioId
+                  )
+              }
+              className="w-full rounded-xl border border-white/10 bg-[#0c0f14] px-4 py-3 text-sm text-gray-200 outline-none disabled:cursor-not-allowed disabled:opacity-50 lg:min-w-[420px]"
+            >
+
+              {incidentScenarios.map(
+                (item) => (
+                  <option
+                    key={
+                      item.id
+                    }
+                    value={
+                      item.id
+                    }
+                  >
+                    {
+                      item.name
+                    }
+                  </option>
+                )
+              )}
+
+            </select>
+
+          </div>
+
+          <p className="mt-3 text-xs leading-5 text-gray-500">
+            {
+              scenario.description
+            }
+          </p>
+
+          <p className="mt-2 text-xs text-gray-600">
+            Expected response:{" "}
+            <span className="text-gray-400">
+              {
+                scenario
+                  .investigation
+                  .diagnosis
+                  .recommended_action
+              }
+            </span>
+          </p>
+
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+
+          <button
+            onClick={
+              onReset
+            }
+            className="rounded-lg border border-white/10 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5"
+          >
+            Reset
+          </button>
+
+          <button
+            onClick={
+              onTrigger
+            }
+            disabled={
+              locked
+            }
+            className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Trigger Selected Incident
+          </button>
+
+        </div>
+
+      </div>
+
+    </section>
   );
 }
 

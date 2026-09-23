@@ -8,6 +8,7 @@ import VoiceAgentPanel from "@/components/VoiceAgentPanel";
 import SafetyGate from "@/components/SafetyGate";
 import IncidentTimeline from "@/components/IncidentTimeline";
 import PostmortemReport from "@/components/PostmortemReport";
+import EvaluationDashboard from "@/components/EvaluationDashboard";
 
 import {
   getIncidentScenario,
@@ -740,42 +741,44 @@ export default function Home() {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
 
-          <IncidentTimeline
-            events={
-              timeline
-            }
-          />
+  <IncidentTimeline
+    events={
+      timeline
+    }
+  />
 
-          <PostmortemReport
-            incidentId={
-              activeScenario
-                ?.incident.id ??
-              "Pending"
-            }
-            severity={
-              activeScenario
-                ?.incident.severity ??
-              "—"
-            }
-            proposal={
-              recoveryProposal
-            }
-            services={
-              services
-            }
-            timeline={
-              timeline
-            }
-            verified={
-              recoveryVerified
-            }
-          />
+  <PostmortemReport
+    incidentId={
+      activeScenario
+        ?.incident.id ??
+      "Pending"
+    }
+    severity={
+      activeScenario
+        ?.incident.severity ??
+      "—"
+    }
+    proposal={
+      recoveryProposal
+    }
+    services={
+      services
+    }
+    timeline={
+      timeline
+    }
+    verified={
+      recoveryVerified
+    }
+  />
 
-        </div>
+</div>
 
-      </div>
+<EvaluationDashboard />
 
-    </main>
+</div>
+
+</main>
   );
 }
 

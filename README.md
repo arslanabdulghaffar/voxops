@@ -1,36 +1,129 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VoxOps
 
-## Getting Started
+## AI Voice Incident Commander for Safe Production Recovery
 
-First, run the development server:
+VoxOps is a real-time voice-operated incident response system built with the AssemblyAI Voice Agent API.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Instead of forcing an engineer to switch between dashboards, logs, deployment histories, and runbooks during an outage, VoxOps lets the engineer investigate the incident by voice.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The important difference is that VoxOps does not blindly execute commands.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+It gathers evidence, diagnoses the incident, validates recovery actions against that evidence, and requires explicit human approval before any state-changing operation.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+> **Voice for speed. Evidence for decisions. Humans for control.**
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Live Demo
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Production:**  
+https://voxops-topaz.vercel.app/
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**GitHub:**  
+https://github.com/arslanabdulghaffar/voxops
 
-## Deploy on Vercel
+Built for the **AssemblyAI Voice Agent Hackathon 2026**.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+# The Problem
+
+Production incidents are stressful and time-sensitive.
+
+During an outage, an engineer may need to simultaneously:
+
+- inspect service health
+- read logs
+- check deployments
+- inspect dependencies
+- identify the root cause
+- decide whether rollback is appropriate
+- coordinate recovery
+- verify that the system recovered
+- document what happened
+
+Voice agents can make this workflow much faster, but production infrastructure introduces an important safety problem:
+
+> A voice agent should not execute a destructive or incorrect recovery action simply because someone asked for it.
+
+VoxOps addresses both problems.
+
+It provides conversational incident investigation while placing deterministic safety controls between AI reasoning and production-changing actions.
+
+---
+
+# What VoxOps Does
+
+An engineer can speak naturally to VoxOps:
+
+> "Investigate the Checkout API incident."
+
+VoxOps then uses incident tools to inspect:
+
+- current service metrics
+- recent logs
+- deployment history
+- dependency health
+
+It produces an evidence-backed diagnosis and recommends an appropriate next action.
+
+For example:
+
+> "Rollback Checkout API to v2.13."
+
+VoxOps validates whether that rollback is supported by the current incident evidence.
+
+If valid, VoxOps creates a recovery proposal.
+
+It **does not execute the rollback**.
+
+The proposal must pass through the human-controlled **Safety Gate**.
+
+---
+
+# Safety-First Recovery
+
+VoxOps separates AI reasoning from production authorization.
+
+```text
+Engineer Voice Command
+        │
+        ▼
+AssemblyAI Voice Agent
+        │
+        ▼
+Intent + Tool Selection
+        │
+        ▼
+Incident Investigation Tools
+        │
+        ▼
+Evidence-Based Diagnosis
+        │
+        ▼
+Recovery Policy Validation
+        │
+        ├──────── Unsafe / Unsupported
+        │                 │
+        │                 ▼
+        │             BLOCK ACTION
+        │
+        ▼
+Valid Recovery Proposal
+        │
+        ▼
+Human Safety Gate
+        │
+        ├── Reject ──► No State Change
+        │
+        └── Approve
+                │
+                ▼
+        Simulated Recovery
+                │
+                ▼
+        Recovery Verification
+                │
+                ▼
+        Incident Timeline
+        + Postmortem Report

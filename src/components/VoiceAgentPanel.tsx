@@ -18,17 +18,55 @@ import {
   type RecoveryProposal,
 } from "@/lib/voxops/incident-tools";
 
+export type VoiceToolObservation = {
+  name: string;
+
+  arguments: Record<
+    string,
+    unknown
+  >;
+
+  result:
+    IncidentToolResult;
+
+  calledAt:
+    number;
+};
+
 type Props = {
   services: Service[];
-  incident: Incident | null;
+
+  incident:
+    Incident | null;
 
   onRecoveryProposal: (
-    proposal: RecoveryProposal
+    proposal:
+      RecoveryProposal
   ) => void;
+  
 
   onToolExecuted?: (
     name: string,
-    result: IncidentToolResult
+    result:
+      IncidentToolResult
+  ) => void;
+
+  onSpeechStarted?: () => void;
+
+  /*
+   * Stage 7B benchmark hooks.
+   *
+   * These are passive observers only.
+   * They do not modify the voice-agent
+   * behavior.
+   */
+  onUserTranscript?: (
+    text: string
+  ) => void;
+
+  onToolObserved?: (
+    observation:
+      VoiceToolObservation
   ) => void;
 };
 
@@ -64,6 +102,9 @@ export default function VoiceAgentPanel({
   incident,
   onRecoveryProposal,
   onToolExecuted,
+  onUserTranscript,
+  onToolObserved,
+  onSpeechStarted,
 }: Props) {
   const [status, setStatus] =
     useState<ConnectionState>(
@@ -536,90 +577,141 @@ After investigate_incident returns, summarize the important evidence and diagnos
   }
 
   function handleToolCall(
-    event: {
-      call_id: string;
-      name: string;
-      arguments?: Record<
-        string,
-        unknown
-      >;
-    }
-  ) {
-    const args =
-      event.arguments ?? {};
+  event: {
+    call_id: string;
 
-    const result =
-  runIncidentTool(
-    event.name,
-    args,
-    {
-      services:
-        servicesRef.current,
+    name: string;
 
-      incident:
-        incidentRef.current,
-    }
-  );
-  onToolExecuted?.(
-  event.name,
-  result
-);
-
-if (
-  event.name ===
-    "request_rollback" &&
-  result.ok &&
-  result.data
-) {
-  const data =
-    result.data as {
-      proposal?: RecoveryProposal;
-    };
-
-  if (data.proposal) {
-    onRecoveryProposal(
-      data.proposal
-    );
+    arguments?: Record<
+      string,
+      unknown
+    >;
   }
-}
+) {
+  const args =
+    event.arguments ?? {};
 
-    setToolActivity(
-      (current) => [
-        ...current,
-        {
-          id:
-            crypto.randomUUID(),
+  /*
+   * Stage 7B:
+   *
+   * Capture the instant the actual
+   * AssemblyAI tool.call reaches the
+   * application.
+   *
+   * This is intentionally captured
+   * before executing our local tool
+   * logic.
+   */
+  const calledAt =
+    performance.now();
 
-          name:
-            event.name,
+  const result =
+    runIncidentTool(
+      event.name,
 
-          arguments: args,
+      args,
 
-          summary:
-            result.summary,
-
-          time:
-            new Date()
-              .toLocaleTimeString(),
-        },
-      ]
-    );
-
-    pendingToolResultsRef.current.push(
       {
-        callId:
-          event.call_id,
+        services:
+          servicesRef.current,
 
-        result,
+        incident:
+          incidentRef.current,
       }
     );
 
-    /*
-     * If the previous reply has already
-     * finished, return immediately.
-     */
-    flushPendingToolResults();
+  /*
+   * Existing application callback.
+   */
+  onToolExecuted?.(
+    event.name,
+    result
+  );
+
+  /*
+   * Stage 7B passive benchmark
+   * observation.
+   *
+   * The benchmark receives exactly
+   * what AssemblyAI selected:
+   *
+   * - tool name
+   * - generated arguments
+   * - resulting safety/tool outcome
+   * - arrival timestamp
+   */
+  onToolObserved?.({
+    name:
+      event.name,
+
+    arguments:
+      args,
+
+    result,
+
+    calledAt,
+  });
+
+  if (
+    event.name ===
+      "request_rollback" &&
+    result.ok &&
+    result.data
+  ) {
+    const data =
+      result.data as {
+        proposal?:
+          RecoveryProposal;
+      };
+
+    if (
+      data.proposal
+    ) {
+      onRecoveryProposal(
+        data.proposal
+      );
+    }
   }
+
+  setToolActivity(
+    (current) => [
+      ...current,
+
+      {
+        id:
+          crypto.randomUUID(),
+
+        name:
+          event.name,
+
+        arguments:
+          args,
+
+        summary:
+          result.summary,
+
+        time:
+          new Date()
+            .toLocaleTimeString(),
+      },
+    ]
+  );
+
+  pendingToolResultsRef.current.push(
+    {
+      callId:
+        event.call_id,
+
+      result,
+    }
+  );
+
+  /*
+   * If the previous reply has already
+   * finished, return immediately.
+   */
+  flushPendingToolResults();
+}
 
   async function connect() {
     if (
@@ -873,14 +965,21 @@ if (
           }
 
           if (
-            event.type ===
-              "reply.started" ||
-            event.type ===
-              "input.speech.started"
-          ) {
-            lastEventTypeRef.current =
-              event.type;
-          }
+  event.type ===
+    "reply.started" ||
+  event.type ===
+    "input.speech.started"
+) {
+  lastEventTypeRef.current =
+    event.type;
+}
+
+if (
+  event.type ===
+  "input.speech.started"
+) {
+  onSpeechStarted?.();
+}
 
           switch (
             event.type
@@ -907,20 +1006,39 @@ if (
               break;
 
             case "transcript.user":
-              setPartialTranscript(
-                ""
-              );
+  setPartialTranscript(
+    ""
+  );
 
-              if (
-                event.text
-              ) {
-                addMessage(
-                  "user",
-                  event.text
-                );
-              }
+  if (
+    event.text
+  ) {
+    const transcript =
+      String(
+        event.text
+      ).trim();
 
-              break;
+    if (
+      transcript
+    ) {
+      addMessage(
+        "user",
+        transcript
+      );
+
+      /*
+       * Stage 7B:
+       * expose AssemblyAI's final
+       * user transcript to the live
+       * benchmark coordinator.
+       */
+      onUserTranscript?.(
+        transcript
+      );
+    }
+  }
+
+  break;
 
             case "transcript.agent":
               if (

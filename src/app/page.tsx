@@ -1,14 +1,19 @@
 "use client";
 
 import {
+  useRef,
   useState,
 } from "react";
 
-import VoiceAgentPanel from "@/components/VoiceAgentPanel";
+import VoiceAgentPanel, {
+  type VoiceToolObservation,
+} from "@/components/VoiceAgentPanel";
+
 import SafetyGate from "@/components/SafetyGate";
 import IncidentTimeline from "@/components/IncidentTimeline";
 import PostmortemReport from "@/components/PostmortemReport";
 import EvaluationDashboard from "@/components/EvaluationDashboard";
+import LiveBenchmarkDashboard from "@/components/LiveBenchmarkDashboard";
 
 import {
   getIncidentScenario,
@@ -25,6 +30,12 @@ import type {
   RecoveryProposal,
 } from "@/lib/voxops/incident-tools";
 
+import {
+  evaluateLiveBenchmarkObservation,
+  getLiveBenchmarkCase,
+  type LiveBenchmarkTrialResult,
+} from "@/lib/voxops/live-benchmark";
+
 import type {
   TimelineEvent,
   TimelineEventType,
@@ -38,6 +49,12 @@ type RecoveryStatus =
   | "rejected";
 
 export default function Home() {
+  /*
+   * -------------------------------------------------------
+   * Main incident state
+   * -------------------------------------------------------
+   */
+
   const [
     selectedScenarioId,
     setSelectedScenarioId,
@@ -100,10 +117,96 @@ export default function Home() {
       []
     );
 
+  /*
+   * -------------------------------------------------------
+   * Stage 7B live benchmark state
+   * -------------------------------------------------------
+   */
+
+  const [
+    activeBenchmarkId,
+    setActiveBenchmarkId,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    liveBenchmarkResults,
+    setLiveBenchmarkResults,
+  ] =
+    useState<
+      LiveBenchmarkTrialResult[]
+    >([]);
+
+  const [
+    benchmarkTranscript,
+    setBenchmarkTranscript,
+  ] =
+    useState("");
+
+  const [
+    benchmarkToolName,
+    setBenchmarkToolName,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    benchmarkToolArguments,
+    setBenchmarkToolArguments,
+  ] =
+    useState<
+      Record<
+        string,
+        unknown
+      > | null
+    >(null);
+
+  /*
+   * Refs are used because transcript and
+   * tool.call events can arrive in either
+   * order and React state updates are
+   * asynchronous.
+   */
+
+  const activeBenchmarkIdRef =
+    useRef<string | null>(
+      null
+    );
+
+  const benchmarkActivatedAtRef =
+    useRef<number | null>(
+      null
+    );
+
+  const benchmarkSpeechStartedAtRef =
+    useRef<number | null>(
+      null
+    );
+
+  const benchmarkTranscriptRef =
+    useRef("");
+
+  const benchmarkToolObservationRef =
+    useRef<VoiceToolObservation | null>(
+      null
+    );
+
+  const benchmarkFinalizedRef =
+    useRef(false);
+
   const selectedScenario =
     getIncidentScenario(
       selectedScenarioId
     );
+
+  /*
+   * -------------------------------------------------------
+   * Timeline helpers
+   * -------------------------------------------------------
+   */
 
   function createTimelineEvent(
     type: TimelineEventType,
@@ -143,11 +246,23 @@ export default function Home() {
     );
   }
 
-  function triggerIncident() {
+  /*
+   * -------------------------------------------------------
+   * Scenario management
+   * -------------------------------------------------------
+   */
+
+  function loadScenario(
+    scenarioId: ScenarioId
+  ) {
     const scenario =
       getIncidentScenario(
-        selectedScenarioId
+        scenarioId
       );
+
+    setSelectedScenarioId(
+      scenarioId
+    );
 
     setActiveScenario(
       scenario
@@ -161,7 +276,8 @@ export default function Home() {
       ...scenario.incident,
 
       startedAt:
-        new Date().toISOString(),
+        new Date()
+          .toISOString(),
     });
 
     setRecoveryProposal(
@@ -187,12 +303,60 @@ export default function Home() {
     ]);
   }
 
+  function triggerIncident() {
+    loadScenario(
+      selectedScenarioId
+    );
+  }
+
+  function resetBenchmarkCapture() {
+    setBenchmarkTranscript(
+      ""
+    );
+
+    setBenchmarkToolName(
+      null
+    );
+
+    setBenchmarkToolArguments(
+      null
+    );
+
+    benchmarkTranscriptRef.current =
+      "";
+
+    benchmarkToolObservationRef.current =
+      null;
+
+    benchmarkActivatedAtRef.current =
+      null;
+
+    benchmarkSpeechStartedAtRef.current =
+      null;
+
+    benchmarkFinalizedRef.current =
+      false;
+  }
+
+  function cancelActiveBenchmark() {
+    activeBenchmarkIdRef.current =
+      null;
+
+    setActiveBenchmarkId(
+      null
+    );
+
+    resetBenchmarkCapture();
+  }
+
   function resetSystem() {
     setServices(
       healthyServices
     );
 
-    setIncident(null);
+    setIncident(
+      null
+    );
 
     setActiveScenario(
       null
@@ -211,7 +375,15 @@ export default function Home() {
     );
 
     setTimeline([]);
+
+    cancelActiveBenchmark();
   }
+
+  /*
+   * -------------------------------------------------------
+   * Recovery
+   * -------------------------------------------------------
+   */
 
   function handleRecoveryProposal(
     proposal: RecoveryProposal
@@ -232,8 +404,7 @@ export default function Home() {
     /*
      * A rejected rollback request is
      * intentionally part of our audit
-     * trail. This demonstrates that
-     * VoxOps can block an unsafe action.
+     * trail.
      */
     if (
       name ===
@@ -387,6 +558,274 @@ export default function Home() {
     );
   }
 
+  /*
+   * -------------------------------------------------------
+   * Stage 7B live benchmark coordinator
+   * -------------------------------------------------------
+   */
+
+  function prepareBenchmarkScenario(
+    scenarioId: ScenarioId
+  ) {
+    /*
+     * Any unfinished benchmark is
+     * cancelled before changing scenario.
+     */
+    activeBenchmarkIdRef.current =
+      null;
+
+    setActiveBenchmarkId(
+      null
+    );
+
+    resetBenchmarkCapture();
+
+    loadScenario(
+      scenarioId
+    );
+  }
+
+  function startLiveBenchmark(
+    benchmarkId: string
+  ) {
+    const benchmarkCase =
+      getLiveBenchmarkCase(
+        benchmarkId
+      );
+
+    if (!benchmarkCase) {
+      return;
+    }
+
+    /*
+     * Do not start a trial against the
+     * wrong scenario or without an
+     * active incident.
+     */
+    if (
+      !incident ||
+      activeScenario?.id !==
+        benchmarkCase.scenarioId
+    ) {
+      return;
+    }
+
+    resetBenchmarkCapture();
+
+    activeBenchmarkIdRef.current =
+      benchmarkId;
+
+    benchmarkActivatedAtRef.current =
+      performance.now();
+
+    benchmarkSpeechStartedAtRef.current =
+      null;
+
+    benchmarkFinalizedRef.current =
+      false;
+
+    setActiveBenchmarkId(
+      benchmarkId
+    );
+  }
+
+  function handleBenchmarkSpeechStarted() {
+    if (
+      !activeBenchmarkIdRef.current
+    ) {
+      return;
+    }
+
+    /*
+     * Only the first speech-start event
+     * belongs to this benchmark trial.
+     */
+    if (
+      benchmarkSpeechStartedAtRef.current ===
+      null
+    ) {
+      benchmarkSpeechStartedAtRef.current =
+        performance.now();
+    }
+  }
+
+  function handleBenchmarkTranscript(
+    transcript: string
+  ) {
+    if (
+      !activeBenchmarkIdRef.current
+    ) {
+      return;
+    }
+
+    const cleaned =
+      transcript.trim();
+
+    if (!cleaned) {
+      return;
+    }
+
+    benchmarkTranscriptRef.current =
+      cleaned;
+
+    setBenchmarkTranscript(
+      cleaned
+    );
+
+    finalizeBenchmarkIfReady();
+  }
+
+  function handleBenchmarkToolObserved(
+    observation:
+      VoiceToolObservation
+  ) {
+    if (
+      !activeBenchmarkIdRef.current
+    ) {
+      return;
+    }
+
+    /*
+     * The benchmark scores the FIRST
+     * operational tool selected by the
+     * voice agent.
+     *
+     * This matters because calling an
+     * incorrect tool first should not be
+     * hidden by a later correct call.
+     */
+    if (
+      benchmarkToolObservationRef.current
+    ) {
+      return;
+    }
+
+    benchmarkToolObservationRef.current =
+      observation;
+
+    setBenchmarkToolName(
+      observation.name
+    );
+
+    setBenchmarkToolArguments(
+      observation.arguments
+    );
+
+    finalizeBenchmarkIfReady();
+  }
+
+  function finalizeBenchmarkIfReady() {
+    const benchmarkId =
+      activeBenchmarkIdRef.current;
+
+    const transcript =
+      benchmarkTranscriptRef.current;
+
+    const toolObservation =
+      benchmarkToolObservationRef.current;
+
+    if (
+      !benchmarkId ||
+      !transcript ||
+      !toolObservation ||
+      benchmarkFinalizedRef.current
+    ) {
+      return;
+    }
+
+    /*
+     * Prefer real detected speech start.
+     *
+     * benchmarkActivatedAt is retained
+     * only as a defensive fallback in
+     * case the speech-start event is not
+     * emitted by the session.
+     */
+    const startedAt =
+      benchmarkSpeechStartedAtRef.current ??
+      benchmarkActivatedAtRef.current;
+
+    if (
+      startedAt ===
+      null
+    ) {
+      return;
+    }
+
+    benchmarkFinalizedRef.current =
+      true;
+
+    const result =
+      evaluateLiveBenchmarkObservation(
+        {
+          benchmarkId,
+
+          transcript,
+
+          toolName:
+            toolObservation.name,
+
+          toolArguments:
+            toolObservation.arguments,
+
+          toolResult:
+            toolObservation.result,
+
+          startedAt,
+
+          toolCalledAt:
+            toolObservation.calledAt,
+        }
+      );
+
+    /*
+     * Keep one canonical result per
+     * benchmark case.
+     *
+     * Re-running LB01, for example,
+     * replaces its previous result rather
+     * than artificially increasing N.
+     */
+    setLiveBenchmarkResults(
+      (current) => [
+        ...current.filter(
+          (existing) =>
+            existing.benchmarkId !==
+            result.benchmarkId
+        ),
+
+        result,
+      ]
+    );
+
+    activeBenchmarkIdRef.current =
+      null;
+
+    setActiveBenchmarkId(
+      null
+    );
+  }
+
+  function clearLiveBenchmarkResults() {
+    if (
+      activeBenchmarkIdRef.current
+    ) {
+      return;
+    }
+
+    setLiveBenchmarkResults(
+      []
+    );
+
+    resetBenchmarkCapture();
+  }
+
+  /*
+   * -------------------------------------------------------
+   * Dashboard statistics
+   * -------------------------------------------------------
+   */
+
   const criticalCount =
     services.filter(
       (service) =>
@@ -402,15 +841,29 @@ export default function Home() {
     ).length;
 
   const isSystemHealthy =
-    criticalCount === 0 &&
-    degradedCount === 0;
+    criticalCount ===
+      0 &&
+    degradedCount ===
+      0;
 
   const scenarioLocked =
-    incident !== null ||
+    incident !==
+      null ||
     recoveryStatus ===
       "pending" ||
     recoveryStatus ===
       "executing";
+
+  /*
+   * Only report the benchmark scenario
+   * as ready while its incident is still
+   * active.
+   */
+  const activeBenchmarkScenarioId =
+    incident &&
+    activeScenario
+      ? activeScenario.id
+      : null;
 
   return (
     <main className="min-h-screen bg-[#07090d] text-white">
@@ -426,6 +879,7 @@ export default function Home() {
             </div>
 
             <div>
+
               <h1 className="text-2xl font-semibold">
                 VoxOps
               </h1>
@@ -433,6 +887,7 @@ export default function Home() {
               <p className="text-sm text-gray-400">
                 AI Voice Incident Commander
               </p>
+
             </div>
 
           </div>
@@ -583,12 +1038,14 @@ export default function Home() {
                 </h3>
 
                 <p className="mt-2 max-w-xs text-sm text-gray-500">
+
                   {recoveryStatus ===
                   "completed"
                     ? recoveryVerified
                       ? "Recovery completed and independently verified by VoxOps."
                       : "Recovery completed. Ask VoxOps to verify the restored service."
                     : "Choose a scenario above and trigger a production incident."}
+
                 </p>
 
                 {recoveryStatus ===
@@ -670,6 +1127,7 @@ export default function Home() {
                         }
                         className="rounded-lg border border-white/10 bg-black/20 p-3"
                       >
+
                         <p className="text-sm text-gray-300">
 
                           <span className="mr-2 text-violet-400">
@@ -684,6 +1142,7 @@ export default function Home() {
                           {item}
 
                         </p>
+
                       </div>
                     )
                   )}
@@ -722,6 +1181,48 @@ export default function Home() {
           onToolExecuted={
             handleToolExecuted
           }
+          onUserTranscript={
+            handleBenchmarkTranscript
+          }
+          onToolObserved={
+            handleBenchmarkToolObserved
+          }
+          onSpeechStarted={
+            handleBenchmarkSpeechStarted
+          }
+        />
+
+        <LiveBenchmarkDashboard
+          activeScenarioId={
+            activeBenchmarkScenarioId
+          }
+          activeBenchmarkId={
+            activeBenchmarkId
+          }
+          currentTranscript={
+            benchmarkTranscript
+          }
+          currentToolName={
+            benchmarkToolName
+          }
+          currentToolArguments={
+            benchmarkToolArguments
+          }
+          results={
+            liveBenchmarkResults
+          }
+          onPrepareScenario={
+            prepareBenchmarkScenario
+          }
+          onStartTrial={
+            startLiveBenchmark
+          }
+          onCancelTrial={
+            cancelActiveBenchmark
+          }
+          onClearResults={
+            clearLiveBenchmarkResults
+          }
         />
 
         <SafetyGate
@@ -741,44 +1242,44 @@ export default function Home() {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
 
-  <IncidentTimeline
-    events={
-      timeline
-    }
-  />
+          <IncidentTimeline
+            events={
+              timeline
+            }
+          />
 
-  <PostmortemReport
-    incidentId={
-      activeScenario
-        ?.incident.id ??
-      "Pending"
-    }
-    severity={
-      activeScenario
-        ?.incident.severity ??
-      "—"
-    }
-    proposal={
-      recoveryProposal
-    }
-    services={
-      services
-    }
-    timeline={
-      timeline
-    }
-    verified={
-      recoveryVerified
-    }
-  />
+          <PostmortemReport
+            incidentId={
+              activeScenario
+                ?.incident.id ??
+              "Pending"
+            }
+            severity={
+              activeScenario
+                ?.incident.severity ??
+              "—"
+            }
+            proposal={
+              recoveryProposal
+            }
+            services={
+              services
+            }
+            timeline={
+              timeline
+            }
+            verified={
+              recoveryVerified
+            }
+          />
 
-</div>
+        </div>
 
-<EvaluationDashboard />
+        <EvaluationDashboard />
 
-</div>
+      </div>
 
-</main>
+    </main>
   );
 }
 
@@ -790,17 +1291,24 @@ function ScenarioSelector({
   onTrigger,
   onReset,
 }: {
-  selectedScenarioId: ScenarioId;
-  scenario: IncidentScenario;
-  locked: boolean;
+  selectedScenarioId:
+    ScenarioId;
+
+  scenario:
+    IncidentScenario;
+
+  locked:
+    boolean;
 
   onChange: (
     id: ScenarioId
   ) => void;
 
-  onTrigger: () => void;
+  onTrigger:
+    () => void;
 
-  onReset: () => void;
+  onReset:
+    () => void;
 }) {
   return (
     <section className="rounded-2xl border border-violet-500/15 bg-violet-500/[0.03] p-5">
@@ -943,7 +1451,8 @@ function StatCard({
 function ServiceCard({
   service,
 }: {
-  service: Service;
+  service:
+    Service;
 }) {
   const statusClass =
     service.status ===

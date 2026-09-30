@@ -14,7 +14,10 @@ import type {
   TimelineEvent,
 } from "@/lib/voxops/timeline";
 
+import type { RecoveryStatus } from "./CommandCenter";
+
 type Props = {
+  recoveryStatus: RecoveryStatus;
   incidentId: string;
   severity: string;
   proposal: RecoveryProposal | null;
@@ -30,6 +33,7 @@ export default function PostmortemReport({
   services,
   timeline,
   verified,
+  recoveryStatus,
 }: Props) {
   const [copied, setCopied] =
     useState(false);
@@ -49,8 +53,8 @@ export default function PostmortemReport({
         <div className="mt-6 flex min-h-[220px] items-center justify-center rounded-xl border border-white/5 bg-black/20">
 
           <p className="max-w-sm text-center text-sm text-gray-600">
-            VoxOps will automatically generate an
-            incident report after recovery.
+            An evidence-backed recovery proposal creates a draft report.
+            Policy blocks and investigations are recorded in the timeline.
           </p>
 
         </div>
@@ -83,6 +87,14 @@ export default function PostmortemReport({
         )
       : 0;
 
+  const recoveryAction = recoveryStatus === "completed"
+    ? `Human-approved rollback from ${proposal.fromVersion} to ${proposal.toVersion} completed.`
+    : recoveryStatus === "executing"
+    ? `Human-approved rollback from ${proposal.fromVersion} to ${proposal.toVersion} is executing.`
+    : recoveryStatus === "rejected"
+    ? `Proposed rollback from ${proposal.fromVersion} to ${proposal.toVersion} was rejected by the human operator. No state change occurred.`
+    : `Proposed rollback from ${proposal.fromVersion} to ${proposal.toVersion} is awaiting human approval. No recovery has executed.`;
+
   const reportText = [
     "VoxOps Incident Postmortem",
     "",
@@ -99,7 +111,7 @@ export default function PostmortemReport({
     ),
     "",
     "Recovery Action:",
-    `Human-approved rollback from ${proposal.fromVersion} to ${proposal.toVersion}.`,
+    recoveryAction,
     "",
     "Recovery Verification:",
     verified && recoveredService
@@ -175,7 +187,7 @@ export default function PostmortemReport({
             >
               {verified
                 ? "Final"
-                : "Awaiting verification"}
+                : recoveryStatus === "pending" ? "Draft / awaiting approval" : recoveryStatus === "rejected" ? "Action rejected" : "Awaiting verification"}
             </span>
 
           </div>
@@ -274,7 +286,7 @@ export default function PostmortemReport({
 
         <ReportBlock
           title="Recovery Action"
-          text={`Human-approved rollback from ${proposal.fromVersion} to ${proposal.toVersion}.`}
+          text={recoveryAction}
         />
 
         <ReportBlock

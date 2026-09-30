@@ -203,7 +203,7 @@ export default function EvaluationDashboard() {
   }
 
   return (
-    <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+    <section id="deterministic-evaluation" className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
 
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
 
@@ -212,7 +212,7 @@ export default function EvaluationDashboard() {
           <div className="flex flex-wrap items-center gap-3">
 
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-violet-400">
-              Stage 7 Evaluation
+              Stage 7A
             </p>
 
             {report && (
@@ -224,7 +224,7 @@ export default function EvaluationDashboard() {
           </div>
 
           <h2 className="mt-2 text-xl font-semibold">
-            Reliability & Safety Evaluation
+            Deterministic Safety & Reliability Evaluation
           </h2>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
@@ -322,7 +322,7 @@ export default function EvaluationDashboard() {
             />
 
             <MetricCard
-              label="Tool Latency"
+              label="Policy Engine Latency"
               value={`${formatLatency(
                 report.summary
                   .medianToolLatencyMs
@@ -1506,7 +1506,7 @@ function createTextReport(
   report: EvaluationReport
 ) {
   const lines = [
-    "VoxOps Reliability & Safety Evaluation",
+    "VoxOps Deterministic Safety & Reliability Evaluation",
     "",
     `Generated: ${new Date(
       report.generatedAt

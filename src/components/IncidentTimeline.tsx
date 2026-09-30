@@ -33,7 +33,7 @@ function getLabel(type: TimelineEventType) {
   }
 }
 
-function getClasses(type: TimelineEventType) {
+function getClasses(type: TimelineEventType): string {
   switch (type) {
     case "incident":
       return "bg-red-500";
@@ -52,6 +52,9 @@ function getClasses(type: TimelineEventType) {
 
     case "verification":
       return "bg-emerald-500";
+
+    case "safety":
+      return "bg-rose-500";
   }
 }
 

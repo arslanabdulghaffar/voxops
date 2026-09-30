@@ -215,7 +215,7 @@ export default function LiveBenchmarkDashboard({
   }
 
   return (
-    <section className="mt-6 rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.025] p-5">
+    <section id="live-evaluation" className="mt-6 rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.025] p-5">
 
       <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
 
@@ -240,7 +240,7 @@ export default function LiveBenchmarkDashboard({
           </div>
 
           <h2 className="mt-3 text-xl font-semibold">
-            Live Voice-Agent Evaluation
+            Live AssemblyAI Voice-Agent Benchmark
           </h2>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">
@@ -448,11 +448,11 @@ function BenchmarkControlPanel({
 
       <div className="mt-4">
 
-        <label className="text-xs text-gray-500">
+        <label htmlFor="benchmark-case" className="text-xs text-gray-500">
           Test Case
         </label>
 
-        <select
+        <select id="benchmark-case"
           value={
             selectedCaseId
           }
@@ -608,7 +608,7 @@ function BenchmarkControlPanel({
 
           <ProcedureStep
             number="2"
-            text="Start the VoxOps Voice Agent above and wait until it shows Listening."
+            text="Open Command Center, start the Voice Agent, and return here once connected."
             complete={
               false
             }
@@ -1007,7 +1007,7 @@ function BenchmarkMetrics({
         />
 
         <MetricCard
-          label="Voice → Tool"
+          label="Voice → Tool Latency"
           value={
             summary
               .medianVoiceToToolLatencyMs ===

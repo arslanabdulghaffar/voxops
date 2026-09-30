@@ -10,6 +10,14 @@ It allows engineers to investigate production incidents using natural voice comm
 
 ---
 
+## Product Views
+
+- **Command Center** brings simulated service health, the live Voice Commander, observed incident evidence, and the evidence-to-authorization pipeline into one workspace.
+- **Evaluation** separates the 11 deterministic safety checks from the six live AssemblyAI voice benchmark cases. Runtime results reflect only the current browser session.
+- **Audit & Postmortem** presents the event timeline and a recovery report with copy and text download controls. Draft reports distinguish proposed, approved, rejected, and completed actions.
+
+Switching views preserves the voice session and evaluation results. Scenario descriptions show neutral symptoms; diagnoses appear after observed tool results. Infrastructure and recovery remain simulated; the AssemblyAI voice and tool-calling path is live.
+
 ## Live Demo
 
 **Production:**  
@@ -711,11 +719,7 @@ npm install
 
 ## 3. Create the environment file
 
-Create:
-
-```text
-.env.local
-```
+Copy `.env.example` to `.env.local`.
 
 Add:
 
@@ -1009,3 +1013,7 @@ VoxOps explores how real-time voice agents can make incident response faster wit
 ## Final Principle
 
 > **Safer operations through evidence, not guesswork.**
+
+## License
+
+MIT License. Copyright (c) 2026 Arslan Abdul Ghaffar. See [LICENSE](LICENSE).

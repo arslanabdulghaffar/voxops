@@ -1,15 +1,8 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useRef, useState } from "react";
 
-import type {
-  Incident,
-  Service,
-} from "@/lib/voxops/scenarios";
+import type { Incident, Service } from "@/lib/voxops/scenarios";
 
 import {
   incidentToolDefinitions,
@@ -21,35 +14,25 @@ import {
 export type VoiceToolObservation = {
   name: string;
 
-  arguments: Record<
-    string,
-    unknown
-  >;
+  arguments: Record<string, unknown>;
 
-  result:
-    IncidentToolResult;
+  result: IncidentToolResult;
 
-  calledAt:
-    number;
+  calledAt: number;
 };
 
+import { OpsIcon, StatusBadge } from "./CommandCenter";
+
 type Props = {
+  onConnectionChange?: (state: ConnectionState) => void;
+  trySaying: string;
   services: Service[];
 
-  incident:
-    Incident | null;
+  incident: Incident | null;
 
-  onRecoveryProposal: (
-    proposal:
-      RecoveryProposal
-  ) => void;
-  
+  onRecoveryProposal: (proposal: RecoveryProposal) => void;
 
-  onToolExecuted?: (
-    name: string,
-    result:
-      IncidentToolResult
-  ) => void;
+  onToolExecuted?: (name: string, result: IncidentToolResult) => void;
 
   onSpeechStarted?: () => void;
 
@@ -60,14 +43,9 @@ type Props = {
    * They do not modify the voice-agent
    * behavior.
    */
-  onUserTranscript?: (
-    text: string
-  ) => void;
+  onUserTranscript?: (text: string) => void;
 
-  onToolObserved?: (
-    observation:
-      VoiceToolObservation
-  ) => void;
+  onToolObserved?: (observation: VoiceToolObservation) => void;
 };
 
 type Message = {
@@ -76,17 +54,15 @@ type Message = {
   text: string;
 };
 
-type ConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "error";
+export type ConnectionState =
+  "disconnected" | "connecting" | "connected" | "error";
 
 type ToolActivity = {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
   summary: string;
+  result: IncidentToolResult;
   time: string;
 };
 
@@ -105,74 +81,63 @@ export default function VoiceAgentPanel({
   onUserTranscript,
   onToolObserved,
   onSpeechStarted,
+  onConnectionChange,
+  trySaying,
 }: Props) {
-  const [status, setStatus] =
-    useState<ConnectionState>(
-      "disconnected"
-    );
+  const [status, setStatus] = useState<ConnectionState>("disconnected");
 
-  const [messages, setMessages] =
-    useState<Message[]>([]);
+  const [activity, setActivity] = useState<
+    "listening" | "user-speaking" | "analyzing"
+  >("listening");
+  const [playing, setPlaying] = useState(false);
+  const conversationRef = useRef<HTMLDivElement>(null);
 
-  const [
-    partialTranscript,
-    setPartialTranscript,
-  ] = useState("");
+  useEffect(() => {
+    onConnectionChange?.(status);
+  }, [status, onConnectionChange]);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
 
-  const [
-    toolActivity,
-    setToolActivity,
-  ] = useState<ToolActivity[]>([]);
+  const [partialTranscript, setPartialTranscript] = useState("");
 
-  const websocketRef =
-    useRef<WebSocket | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const audioContextRef =
-    useRef<AudioContext | null>(null);
+  const [toolActivity, setToolActivity] = useState<ToolActivity[]>([]);
 
-  const mediaStreamRef =
-    useRef<MediaStream | null>(null);
+  useEffect(() => {
+    const element = conversationRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [messages, partialTranscript]);
 
-  const workletRef =
-    useRef<AudioWorkletNode | null>(
-      null
-    );
+  const websocketRef = useRef<WebSocket | null>(null);
 
-  const sourceNodeRef =
-    useRef<MediaStreamAudioSourceNode | null>(
-      null
-    );
+  const audioContextRef = useRef<AudioContext | null>(null);
 
-  const silentGainRef =
-    useRef<GainNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
-  const sessionReadyRef =
-    useRef(false);
+  const workletRef = useRef<AudioWorkletNode | null>(null);
 
-  const playbackTimeRef =
-    useRef(0);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
-  const scheduledSourcesRef =
-    useRef<AudioBufferSourceNode[]>([]);
+  const silentGainRef = useRef<GainNode | null>(null);
+
+  const sessionReadyRef = useRef(false);
+
+  const playbackTimeRef = useRef(0);
+
+  const scheduledSourcesRef = useRef<AudioBufferSourceNode[]>([]);
 
   /*
    * Keep the latest React state available
    * to tool calls without reconnecting.
    */
-  const servicesRef =
-    useRef<Service[]>(services);
+  const servicesRef = useRef<Service[]>(services);
 
-  const incidentRef =
-    useRef<Incident | null>(incident);
+  const incidentRef = useRef<Incident | null>(incident);
 
-  const lastEventTypeRef =
-    useRef<string | null>(null);
+  const lastEventTypeRef = useRef<string | null>(null);
 
-  const pendingToolResultsRef =
-    useRef<PendingToolResult[]>([]);
+  const pendingToolResultsRef = useRef<PendingToolResult[]>([]);
 
   useEffect(() => {
     servicesRef.current = services;
@@ -183,41 +148,30 @@ export default function VoiceAgentPanel({
      * the agent is connected, update the
      * system prompt and keyterms.
      */
-    const websocket =
-      websocketRef.current;
+    const websocket = websocketRef.current;
 
     if (
       sessionReadyRef.current &&
       websocket &&
-      websocket.readyState ===
-        WebSocket.OPEN
+      websocket.readyState === WebSocket.OPEN
     ) {
       websocket.send(
         JSON.stringify({
           type: "session.update",
 
           session: {
-            system_prompt:
-              createSystemPrompt(
-                services,
-                incident
-              ),
+            system_prompt: createSystemPrompt(services, incident),
 
             input: {
-              keyterms:
-                createKeyterms(
-                  services
-                ),
+              keyterms: createKeyterms(services),
             },
           },
-        })
+        }),
       );
     }
   }, [services, incident]);
 
-  function createKeyterms(
-    currentServices: Service[]
-  ) {
+  function createKeyterms(currentServices: Service[]) {
     return [
       "VoxOps",
       "SEV-1",
@@ -226,30 +180,21 @@ export default function VoiceAgentPanel({
       "rollback",
       "deployment",
       "latency",
-      ...currentServices.map(
-        (service) => service.name
-      ),
-      ...currentServices.map(
-        (service) => service.version
-      ),
+      ...currentServices.map((service) => service.name),
+      ...currentServices.map((service) => service.version),
     ];
   }
 
   function createSystemPrompt(
     currentServices: Service[],
-    currentIncident: Incident | null
+    currentIncident: Incident | null,
   ) {
-    const serviceNames =
-      currentServices
-        .map(
-          (service) =>
-            `- ${service.name}`
-        )
-        .join("\n");
+    const serviceNames = currentServices
+      .map((service) => `- ${service.name}`)
+      .join("\n");
 
-    const incidentContext =
-      currentIncident
-        ? `
+    const incidentContext = currentIncident
+      ? `
 There is currently an active incident.
 
 Incident ID: ${currentIncident.id}
@@ -257,7 +202,7 @@ Severity: ${currentIncident.severity}
 Affected service: ${currentIncident.service}
 Reported symptom: ${currentIncident.title}
 `
-        : `
+      : `
 There is currently no active incident.
 `;
 
@@ -338,181 +283,114 @@ After investigate_incident returns, summarize the important evidence and diagnos
 `;
   }
 
-  function arrayBufferToBase64(
-    buffer: ArrayBuffer
-  ) {
-    const bytes =
-      new Uint8Array(buffer);
+  function arrayBufferToBase64(buffer: ArrayBuffer) {
+    const bytes = new Uint8Array(buffer);
 
     let binary = "";
 
     const chunkSize = 0x8000;
 
-    for (
-      let i = 0;
-      i < bytes.length;
-      i += chunkSize
-    ) {
-      binary +=
-        String.fromCharCode(
-          ...bytes.subarray(
-            i,
-            Math.min(
-              i + chunkSize,
-              bytes.length
-            )
-          )
-        );
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(
+        ...bytes.subarray(i, Math.min(i + chunkSize, bytes.length)),
+      );
     }
 
     return btoa(binary);
   }
 
   function flushPlayback() {
-    scheduledSourcesRef.current.forEach(
-      (source) => {
-        try {
-          source.stop();
-        } catch {}
-      }
-    );
+    setPlaying(false);
+    scheduledSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch {}
+    });
 
     scheduledSourcesRef.current = [];
 
     if (audioContextRef.current) {
-      playbackTimeRef.current =
-        audioContextRef.current.currentTime;
+      playbackTimeRef.current = audioContextRef.current.currentTime;
     }
   }
 
-  function playPCM(
-    base64Audio: string
-  ) {
-    const audioContext =
-      audioContextRef.current;
+  function playPCM(base64Audio: string) {
+    const audioContext = audioContextRef.current;
 
     if (!audioContext) {
       return;
     }
 
-    const binary =
-      atob(base64Audio);
+    const binary = atob(base64Audio);
 
-    const bytes =
-      new Uint8Array(
-        binary.length
-      );
+    const bytes = new Uint8Array(binary.length);
 
-    for (
-      let i = 0;
-      i < binary.length;
-      i++
-    ) {
-      bytes[i] =
-        binary.charCodeAt(i);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
 
-    const sampleCount =
-      Math.floor(
-        bytes.byteLength / 2
-      );
+    const sampleCount = Math.floor(bytes.byteLength / 2);
 
-    const floatSamples =
-      new Float32Array(
-        sampleCount
-      );
+    const floatSamples = new Float32Array(sampleCount);
 
-    const view =
-      new DataView(bytes.buffer);
+    const view = new DataView(bytes.buffer);
 
-    for (
-      let i = 0;
-      i < sampleCount;
-      i++
-    ) {
-      const sample =
-        view.getInt16(
-          i * 2,
-          true
-        );
+    for (let i = 0; i < sampleCount; i++) {
+      const sample = view.getInt16(i * 2, true);
 
-      floatSamples[i] =
-        sample / 0x8000;
+      floatSamples[i] = sample / 0x8000;
     }
 
-    const audioBuffer =
-      audioContext.createBuffer(
-        1,
-        floatSamples.length,
-        SAMPLE_RATE
-      );
-
-    audioBuffer
-      .getChannelData(0)
-      .set(floatSamples);
-
-    const source =
-      audioContext.createBufferSource();
-
-    source.buffer =
-      audioBuffer;
-
-    source.connect(
-      audioContext.destination
+    const audioBuffer = audioContext.createBuffer(
+      1,
+      floatSamples.length,
+      SAMPLE_RATE,
     );
 
-    const now =
-      audioContext.currentTime;
+    audioBuffer.getChannelData(0).set(floatSamples);
 
-    if (
-      playbackTimeRef.current <
-      now
-    ) {
-      playbackTimeRef.current =
-        now;
+    const source = audioContext.createBufferSource();
+
+    source.buffer = audioBuffer;
+
+    source.connect(audioContext.destination);
+
+    const now = audioContext.currentTime;
+
+    if (playbackTimeRef.current < now) {
+      playbackTimeRef.current = now;
     }
 
-    source.start(
-      playbackTimeRef.current
-    );
+    source.start(playbackTimeRef.current);
 
-    playbackTimeRef.current +=
-      audioBuffer.duration;
+    playbackTimeRef.current += audioBuffer.duration;
 
-    scheduledSourcesRef.current.push(
-      source
-    );
+    scheduledSourcesRef.current.push(source);
+    setPlaying(true);
 
     source.onended = () => {
-      scheduledSourcesRef.current =
-        scheduledSourcesRef.current.filter(
-          (item) =>
-            item !== source
-        );
+      scheduledSourcesRef.current = scheduledSourcesRef.current.filter(
+        (item) => item !== source,
+      );
+      if (scheduledSourcesRef.current.length === 0) setPlaying(false);
     };
   }
 
-  function addMessage(
-    role: "user" | "agent",
-    text: string
-  ) {
-    const trimmed =
-      text.trim();
+  function addMessage(role: "user" | "agent", text: string) {
+    const trimmed = text.trim();
 
     if (!trimmed) {
       return;
     }
 
-    setMessages(
-      (current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role,
-          text: trimmed,
-        },
-      ]
-    );
+    setMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role,
+        text: trimmed,
+      },
+    ]);
   }
 
   /*
@@ -523,966 +401,716 @@ After investigate_incident returns, summarize the important evidence and diagnos
    * following their recommended tool flow.
    */
   function flushPendingToolResults() {
-    const websocket =
-      websocketRef.current;
+    const websocket = websocketRef.current;
 
-    if (
-      !websocket ||
-      websocket.readyState !==
-        WebSocket.OPEN
-    ) {
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    if (
-      lastEventTypeRef.current !==
-      "reply.done"
-    ) {
+    if (lastEventTypeRef.current !== "reply.done") {
       return;
     }
 
-    if (
-      pendingToolResultsRef.current
-        .length === 0
-    ) {
+    if (pendingToolResultsRef.current.length === 0) {
       return;
     }
 
-    const pending = [
-      ...pendingToolResultsRef.current,
-    ];
+    const pending = [...pendingToolResultsRef.current];
 
-    pendingToolResultsRef.current =
-      [];
+    pendingToolResultsRef.current = [];
 
     for (const tool of pending) {
       websocket.send(
         JSON.stringify({
           type: "tool.result",
 
-          call_id:
-            tool.callId,
+          call_id: tool.callId,
 
           /*
            * AssemblyAI expects
            * result as a JSON string.
            */
-          result:
-            JSON.stringify(
-              tool.result
-            ),
-        })
+          result: JSON.stringify(tool.result),
+        }),
       );
     }
   }
 
-  function handleToolCall(
-  event: {
+  function handleToolCall(event: {
     call_id: string;
 
     name: string;
 
-    arguments?: Record<
-      string,
-      unknown
-    >;
-  }
-) {
-  const args =
-    event.arguments ?? {};
+    arguments?: Record<string, unknown>;
+  }) {
+    setActivity("analyzing");
+    const args = event.arguments ?? {};
 
-  /*
-   * Stage 7B:
-   *
-   * Capture the instant the actual
-   * AssemblyAI tool.call reaches the
-   * application.
-   *
-   * This is intentionally captured
-   * before executing our local tool
-   * logic.
-   */
-  const calledAt =
-    performance.now();
+    /*
+     * Stage 7B:
+     *
+     * Capture the instant the actual
+     * AssemblyAI tool.call reaches the
+     * application.
+     *
+     * This is intentionally captured
+     * before executing our local tool
+     * logic.
+     */
+    const calledAt = performance.now();
 
-  const result =
-    runIncidentTool(
+    const result = runIncidentTool(
       event.name,
 
       args,
 
       {
-        services:
-          servicesRef.current,
+        services: servicesRef.current,
 
-        incident:
-          incidentRef.current,
-      }
+        incident: incidentRef.current,
+      },
     );
 
-  /*
-   * Existing application callback.
-   */
-  onToolExecuted?.(
-    event.name,
-    result
-  );
+    /*
+     * Existing application callback.
+     */
+    onToolExecuted?.(event.name, result);
 
-  /*
-   * Stage 7B passive benchmark
-   * observation.
-   *
-   * The benchmark receives exactly
-   * what AssemblyAI selected:
-   *
-   * - tool name
-   * - generated arguments
-   * - resulting safety/tool outcome
-   * - arrival timestamp
-   */
-  onToolObserved?.({
-    name:
-      event.name,
+    /*
+     * Stage 7B passive benchmark
+     * observation.
+     *
+     * The benchmark receives exactly
+     * what AssemblyAI selected:
+     *
+     * - tool name
+     * - generated arguments
+     * - resulting safety/tool outcome
+     * - arrival timestamp
+     */
+    onToolObserved?.({
+      name: event.name,
 
-    arguments:
-      args,
+      arguments: args,
 
-    result,
+      result,
 
-    calledAt,
-  });
+      calledAt,
+    });
 
-  if (
-    event.name ===
-      "request_rollback" &&
-    result.ok &&
-    result.data
-  ) {
-    const data =
-      result.data as {
-        proposal?:
-          RecoveryProposal;
+    if (event.name === "request_rollback" && result.ok && result.data) {
+      const data = result.data as {
+        proposal?: RecoveryProposal;
       };
 
-    if (
-      data.proposal
-    ) {
-      onRecoveryProposal(
-        data.proposal
-      );
+      if (data.proposal) {
+        onRecoveryProposal(data.proposal);
+      }
     }
-  }
 
-  setToolActivity(
-    (current) => [
+    setToolActivity((current) => [
       ...current,
 
       {
-        id:
-          crypto.randomUUID(),
+        id: crypto.randomUUID(),
 
-        name:
-          event.name,
+        name: event.name,
 
-        arguments:
-          args,
+        arguments: args,
 
-        summary:
-          result.summary,
+        summary: result.summary,
 
-        time:
-          new Date()
-            .toLocaleTimeString(),
+        result,
+
+        time: new Date().toLocaleTimeString(),
       },
-    ]
-  );
+    ]);
 
-  pendingToolResultsRef.current.push(
-    {
-      callId:
-        event.call_id,
+    pendingToolResultsRef.current.push({
+      callId: event.call_id,
 
       result,
-    }
-  );
+    });
 
-  /*
-   * If the previous reply has already
-   * finished, return immediately.
-   */
-  flushPendingToolResults();
-}
+    /*
+     * If the previous reply has already
+     * finished, return immediately.
+     */
+    flushPendingToolResults();
+  }
 
   async function connect() {
-    if (
-      status === "connecting"
-    ) {
+    if (status === "connecting") {
       return;
     }
 
     try {
+      await cleanup();
+      setActivity("listening");
       setError(null);
       setMessages([]);
       setToolActivity([]);
       setPartialTranscript("");
 
-      setStatus(
-        "connecting"
-      );
+      setStatus("connecting");
 
-      lastEventTypeRef.current =
-        null;
+      lastEventTypeRef.current = null;
 
-      pendingToolResultsRef.current =
-        [];
+      pendingToolResultsRef.current = [];
 
-      const tokenResponse =
-        await fetch(
-          "/api/voice-token",
-          {
-            cache:
-              "no-store",
-          }
-        );
+      const tokenResponse = await fetch("/api/voice-token", {
+        cache: "no-store",
+      });
 
-      const tokenData =
-        await tokenResponse.json();
+      const tokenData = await tokenResponse.json();
 
-      if (
-        !tokenResponse.ok ||
-        !tokenData.token
-      ) {
+      if (!tokenResponse.ok || !tokenData.token) {
         throw new Error(
           tokenData.details ||
             tokenData.error ||
-            "Unable to obtain AssemblyAI token."
+            "Unable to obtain AssemblyAI token.",
         );
       }
 
-      const stream =
-        await navigator.mediaDevices.getUserMedia(
-          {
-            audio: {
-              echoCancellation:
-                true,
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
 
-              noiseSuppression:
-                true,
+          noiseSuppression: true,
 
-              autoGainControl:
-                true,
+          autoGainControl: true,
 
-              channelCount: 1,
-            },
-          }
-        );
+          channelCount: 1,
+        },
+      });
 
-      mediaStreamRef.current =
-        stream;
+      mediaStreamRef.current = stream;
 
-      const audioContext =
-        new AudioContext({
-          sampleRate:
-            SAMPLE_RATE,
-        });
+      const audioContext = new AudioContext({
+        sampleRate: SAMPLE_RATE,
+      });
 
-      audioContextRef.current =
-        audioContext;
+      audioContextRef.current = audioContext;
 
       await audioContext.resume();
 
-      playbackTimeRef.current =
-        audioContext.currentTime;
+      playbackTimeRef.current = audioContext.currentTime;
 
-      await audioContext.audioWorklet.addModule(
-        "/pcm-processor.js"
-      );
+      await audioContext.audioWorklet.addModule("/pcm-processor.js");
 
-      const sourceNode =
-        audioContext.createMediaStreamSource(
-          stream
-        );
+      const sourceNode = audioContext.createMediaStreamSource(stream);
 
-      sourceNodeRef.current =
-        sourceNode;
+      sourceNodeRef.current = sourceNode;
 
-      const workletNode =
-        new AudioWorkletNode(
-          audioContext,
-          "pcm-processor"
-        );
+      const workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
 
-      workletRef.current =
-        workletNode;
+      workletRef.current = workletNode;
 
-      const silentGain =
-        audioContext.createGain();
+      const silentGain = audioContext.createGain();
 
       silentGain.gain.value = 0;
 
-      silentGainRef.current =
-        silentGain;
+      silentGainRef.current = silentGain;
 
-      sourceNode.connect(
-        workletNode
-      );
+      sourceNode.connect(workletNode);
 
-      workletNode.connect(
-        silentGain
-      );
+      workletNode.connect(silentGain);
 
-      silentGain.connect(
-        audioContext.destination
-      );
+      silentGain.connect(audioContext.destination);
 
-      const websocketUrl =
-        new URL(
-          "wss://agents.assemblyai.com/v1/ws"
-        );
+      const websocketUrl = new URL("wss://agents.assemblyai.com/v1/ws");
 
-      websocketUrl.searchParams.set(
-        "token",
-        tokenData.token
-      );
+      websocketUrl.searchParams.set("token", tokenData.token);
 
-      const websocket =
-        new WebSocket(
-          websocketUrl.toString()
-        );
+      const websocket = new WebSocket(websocketUrl.toString());
 
-      websocketRef.current =
-        websocket;
+      websocketRef.current = websocket;
 
       websocket.onopen = () => {
         websocket.send(
           JSON.stringify({
-            type:
-              "session.update",
+            type: "session.update",
 
             session: {
-              system_prompt:
-                createSystemPrompt(
-                  servicesRef.current,
-                  incidentRef.current
-                ),
+              system_prompt: createSystemPrompt(
+                servicesRef.current,
+                incidentRef.current,
+              ),
 
-              greeting:
-                incidentRef.current
-                  ? `VoxOps online. I see an active ${incidentRef.current.severity} incident affecting ${incidentRef.current.service}. I can investigate metrics, logs, deployments, and dependencies.`
-                  : "VoxOps online. All monitored services are currently healthy.",
+              greeting: incidentRef.current
+                ? `VoxOps online. I see an active ${incidentRef.current.severity} incident affecting ${incidentRef.current.service}. I can investigate metrics, logs, deployments, and dependencies.`
+                : "VoxOps online. All monitored services are currently healthy.",
 
-              tools:
-                incidentToolDefinitions,
+              tools: incidentToolDefinitions,
 
               output: {
-                voice:
-                  "anna",
+                voice: "anna",
               },
 
               input: {
-                keyterms:
-                  createKeyterms(
-                    servicesRef.current
-                  ),
+                keyterms: createKeyterms(servicesRef.current),
 
                 turn_detection: {
-                  vad_threshold:
-                    0.5,
+                  vad_threshold: 0.5,
 
-                  min_silence:
-                    500,
+                  min_silence: 500,
 
-                  max_silence:
-                    1400,
+                  max_silence: 1400,
 
-                  interrupt_response:
-                    true,
+                  interrupt_response: true,
                 },
               },
             },
-          })
+          }),
         );
       };
 
-      workletNode.port.onmessage =
-        (event) => {
-          const websocket =
-            websocketRef.current;
+      workletNode.port.onmessage = (event) => {
+        const websocket = websocketRef.current;
 
-          if (
-            !sessionReadyRef.current ||
-            !websocket ||
-            websocket.readyState !==
-              WebSocket.OPEN
-          ) {
-            return;
+        if (
+          !sessionReadyRef.current ||
+          !websocket ||
+          websocket.readyState !== WebSocket.OPEN
+        ) {
+          return;
+        }
+
+        websocket.send(
+          JSON.stringify({
+            type: "input.audio",
+
+            audio: arrayBufferToBase64(event.data),
+          }),
+        );
+      };
+
+      websocket.onmessage = (messageEvent) => {
+        let event;
+
+        try {
+          event = JSON.parse(messageEvent.data);
+        } catch {
+          return;
+        }
+        console.log("[AssemblyAI event]", event.type, event);
+
+        /*
+         * Tool calls are handled
+         * before the general event switch.
+         */
+        if (event.type === "tool.call") {
+          handleToolCall(event);
+
+          return;
+        }
+
+        if (
+          event.type === "reply.started" ||
+          event.type === "input.speech.started"
+        ) {
+          lastEventTypeRef.current = event.type;
+        }
+
+        if (event.type === "input.speech.started") {
+          setActivity("user-speaking");
+          onSpeechStarted?.();
+        }
+
+        switch (event.type) {
+          case "session.ready":
+            sessionReadyRef.current = true;
+
+            setStatus("connected");
+
+            break;
+
+          case "input.speech.stopped":
+            setActivity("analyzing");
+            break;
+
+          case "transcript.user.delta":
+            setActivity("user-speaking");
+            if (event.text) {
+              setPartialTranscript(event.text);
+            }
+
+            break;
+
+          case "transcript.user":
+            setActivity("analyzing");
+            setPartialTranscript("");
+
+            if (event.text) {
+              const transcript = String(event.text).trim();
+
+              if (transcript) {
+                addMessage("user", transcript);
+
+                /*
+                 * Stage 7B:
+                 * expose AssemblyAI's final
+                 * user transcript to the live
+                 * benchmark coordinator.
+                 */
+                onUserTranscript?.(transcript);
+              }
+            }
+
+            break;
+
+          case "transcript.agent":
+            if (event.text) {
+              addMessage("agent", event.text);
+            }
+
+            break;
+
+          case "reply.audio":
+            if (event.data) {
+              playPCM(event.data);
+            }
+
+            break;
+
+          case "reply.done": {
+            const awaitingToolReply =
+              pendingToolResultsRef.current.length > 0 &&
+              event.status !== "interrupted";
+            setActivity((current) =>
+              event.status === "interrupted" && current === "user-speaking"
+                ? current
+                : awaitingToolReply
+                  ? "analyzing"
+                  : "listening",
+            );
+            lastEventTypeRef.current = "reply.done";
+
+            if (event.status === "interrupted") {
+              flushPlayback();
+
+              pendingToolResultsRef.current = [];
+            } else {
+              flushPendingToolResults();
+            }
+
+            break;
           }
 
-          websocket.send(
-            JSON.stringify({
-              type:
-                "input.audio",
+          case "session.error":
+            console.error("AssemblyAI session error:", event);
 
-              audio:
-                arrayBufferToBase64(
-                  event.data
-                ),
-            })
-          );
-        };
-
-      websocket.onmessage =
-        (messageEvent) => {
-          let event;
-
-          try {
-            event =
-              JSON.parse(
-                messageEvent.data
-              );
-          } catch {
-            return;
-          }
-          console.log(
-            "[AssemblyAI event]",
-            event.type,
-            event
-          );
-
-          /*
-           * Tool calls are handled
-           * before the general event switch.
-           */
-          if (
-            event.type ===
-            "tool.call"
-          ) {
-            handleToolCall(
-              event
+            setError(
+              event.message ||
+                event.error?.message ||
+                "AssemblyAI session error.",
             );
 
-            return;
-          }
+            setStatus("error");
+            void cleanup();
 
-          if (
-  event.type ===
-    "reply.started" ||
-  event.type ===
-    "input.speech.started"
-) {
-  lastEventTypeRef.current =
-    event.type;
-}
+            break;
 
-if (
-  event.type ===
-  "input.speech.started"
-) {
-  onSpeechStarted?.();
-}
+          default:
+            break;
+        }
+      };
 
-          switch (
-            event.type
-          ) {
-            case "session.ready":
-              sessionReadyRef.current =
-                true;
+      websocket.onerror = () => {
+        setError("Voice WebSocket connection failed.");
 
-              setStatus(
-                "connected"
-              );
+        setStatus("error");
+        void cleanup();
+      };
 
-              break;
+      websocket.onclose = () => {
+        sessionReadyRef.current = false;
 
-            case "transcript.user.delta":
-              if (
-                event.text
-              ) {
-                setPartialTranscript(
-                  event.text
-                );
-              }
-
-              break;
-
-            case "transcript.user":
-  setPartialTranscript(
-    ""
-  );
-
-  if (
-    event.text
-  ) {
-    const transcript =
-      String(
-        event.text
-      ).trim();
-
-    if (
-      transcript
-    ) {
-      addMessage(
-        "user",
-        transcript
-      );
-
-      /*
-       * Stage 7B:
-       * expose AssemblyAI's final
-       * user transcript to the live
-       * benchmark coordinator.
-       */
-      onUserTranscript?.(
-        transcript
-      );
-    }
-  }
-
-  break;
-
-            case "transcript.agent":
-              if (
-                event.text
-              ) {
-                addMessage(
-                  "agent",
-                  event.text
-                );
-              }
-
-              break;
-
-            case "reply.audio":
-              if (
-                event.data
-              ) {
-                playPCM(
-                  event.data
-                );
-              }
-
-              break;
-
-            case "reply.done":
-              lastEventTypeRef.current =
-                "reply.done";
-
-              if (
-                event.status ===
-                "interrupted"
-              ) {
-                flushPlayback();
-
-                pendingToolResultsRef.current =
-                  [];
-              } else {
-                flushPendingToolResults();
-              }
-
-              break;
-
-            case "session.error":
-              console.error(
-                "AssemblyAI session error:",
-                event
-              );
-
-              setError(
-                event.message ||
-                  event.error
-                    ?.message ||
-                  "AssemblyAI session error."
-              );
-
-              setStatus(
-                "error"
-              );
-
-              break;
-
-            default:
-              break;
-          }
-        };
-
-      websocket.onerror =
-        () => {
-          setError(
-            "Voice WebSocket connection failed."
-          );
-
-          setStatus(
-            "error"
-          );
-        };
-
-      websocket.onclose =
-        () => {
-          sessionReadyRef.current =
-            false;
-
-          setStatus(
-            (current) =>
-              current ===
-              "error"
-                ? "error"
-                : "disconnected"
-          );
-        };
-    } catch (
-      connectionError
-    ) {
-      console.error(
-        connectionError
-      );
+        setStatus((current) =>
+          current === "error" ? "error" : "disconnected",
+        );
+        void cleanup();
+      };
+    } catch (connectionError) {
+      console.error(connectionError);
 
       setError(
-        connectionError instanceof
-          Error
+        connectionError instanceof Error
           ? connectionError.message
-          : "Unable to start VoxOps voice agent."
+          : "Unable to start VoxOps voice agent.",
       );
 
-      setStatus(
-        "error"
-      );
+      setStatus("error");
 
       await cleanup();
     }
   }
 
   async function cleanup() {
-    sessionReadyRef.current =
-      false;
+    sessionReadyRef.current = false;
 
-    pendingToolResultsRef.current =
-      [];
+    pendingToolResultsRef.current = [];
 
-    lastEventTypeRef.current =
-      null;
+    lastEventTypeRef.current = null;
 
     flushPlayback();
 
-    if (
-      websocketRef.current
-    ) {
-      websocketRef.current.onclose =
-        null;
+    if (websocketRef.current) {
+      websocketRef.current.onclose = null;
 
       websocketRef.current.close();
 
-      websocketRef.current =
-        null;
+      websocketRef.current = null;
     }
 
-    if (
-      workletRef.current
-    ) {
+    if (workletRef.current) {
       try {
         workletRef.current.disconnect();
       } catch {}
 
-      workletRef.current =
-        null;
+      workletRef.current = null;
     }
 
-    if (
-      sourceNodeRef.current
-    ) {
+    if (sourceNodeRef.current) {
       try {
         sourceNodeRef.current.disconnect();
       } catch {}
 
-      sourceNodeRef.current =
-        null;
+      sourceNodeRef.current = null;
     }
 
-    if (
-      silentGainRef.current
-    ) {
+    if (silentGainRef.current) {
       try {
         silentGainRef.current.disconnect();
       } catch {}
 
-      silentGainRef.current =
-        null;
+      silentGainRef.current = null;
     }
 
-    if (
-      mediaStreamRef.current
-    ) {
-      mediaStreamRef.current
-        .getTracks()
-        .forEach(
-          (track) =>
-            track.stop()
-        );
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
 
-      mediaStreamRef.current =
-        null;
+      mediaStreamRef.current = null;
     }
 
-    if (
-      audioContextRef.current
-    ) {
+    if (audioContextRef.current) {
       try {
         await audioContextRef.current.close();
       } catch {}
 
-      audioContextRef.current =
-        null;
+      audioContextRef.current = null;
     }
   }
 
   async function disconnect() {
     await cleanup();
 
-    setPartialTranscript(
-      ""
-    );
+    setPartialTranscript("");
 
-    setStatus(
-      "disconnected"
-    );
+    setStatus("disconnected");
   }
 
-  const statusText = {
-    disconnected: "Offline",
-    connecting:
-      "Connecting...",
-    connected:
-      "Listening",
-    error:
-      "Connection error",
-  }[status];
+  const visualState =
+    status !== "connected"
+      ? status
+      : activity === "user-speaking"
+        ? "user-speaking"
+        : playing
+          ? "agent-speaking"
+          : activity;
+  const stateLabels = {
+    disconnected: "Ready to connect",
+    connecting: "Connecting",
+    listening: "Listening",
+    "user-speaking": "You are speaking",
+    analyzing: "Analyzing command",
+    "agent-speaking": "Agent speaking",
+    error: "Connection error",
+  };
+  const statusText = stateLabels[visualState];
+  const latestUser = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  const toolLabels: Record<string, string> = {
+    investigate_incident: "Investigate incident",
+    get_service_metrics: "Read service metrics",
+    query_service_logs: "Inspect service logs",
+    get_recent_deployments: "Check deployments",
+    get_dependency_health: "Inspect dependencies",
+    request_rollback: "Validate rollback request",
+    verify_recovery: "Verify service recovery",
+  };
 
   return (
-    <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
+    <section className="panel voice-panel">
+      <div className="panel-heading">
         <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold">
-              VoxOps Voice Command
-            </h2>
-
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs ${
-                status ===
-                "connected"
-                  ? "bg-emerald-500/10 text-emerald-400"
-                  : status ===
-                    "error"
-                  ? "bg-red-500/10 text-red-400"
-                  : status ===
-                    "connecting"
-                  ? "bg-yellow-500/10 text-yellow-400"
-                  : "bg-white/5 text-gray-400"
-              }`}
-            >
-              ● {statusText}
-            </span>
-          </div>
-
-          <p className="mt-1 text-sm text-gray-500">
-            AssemblyAI voice reasoning with live incident tools.
-          </p>
+          <p className="eyebrow">AssemblyAI Voice Agent</p>
+          <h2>Voice Commander</h2>
         </div>
-
-        {status ===
-        "connected" ? (
+        <StatusBadge
+          tone={
+            status === "connected"
+              ? "cyan"
+              : status === "error"
+                ? "red"
+                : "neutral"
+          }
+        >
+          {status === "connected"
+            ? "Connected"
+            : status === "connecting"
+              ? "Connecting"
+              : status === "error"
+                ? "Error"
+                : "Offline"}
+        </StatusBadge>
+      </div>
+      <div className={`voice-stage voice-${visualState}`}>
+        <div className="voice-orbit" aria-hidden="true">
+          <div className="voice-orbit-inner">
+            <OpsIcon kind="mic" />
+          </div>
+          <span className="orbit-tick tick-one" />
+          <span className="orbit-tick tick-two" />
+        </div>
+        <p className="voice-state" role="status">
+          {statusText}
+        </p>
+        <p className="voice-state-hint">
+          {status === "connected"
+            ? "Microphone active / 24 kHz PCM"
+            : status === "connecting"
+              ? "Establishing a secure voice session"
+              : "Your incident response starts with a conversation."}
+        </p>
+        <div className="voice-activity" aria-hidden="true">
+          {Array.from({ length: 19 }, (_, index) => (
+            <span key={index} style={{ animationDelay: `${index * 65}ms` }} />
+          ))}
+        </div>
+        <span className="activity-caption">Session activity indicator</span>
+        {status === "connected" ? (
           <button
-            onClick={
-              disconnect
-            }
-            className="rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-2.5 text-sm font-medium text-red-400 hover:bg-red-500/20"
+            className="button button-stop voice-control"
+            onClick={disconnect}
           >
-            Disconnect Voice
+            <OpsIcon kind="mic" />
+            Stop Voice Agent
           </button>
         ) : (
           <button
-            onClick={
-              connect
-            }
-            disabled={
-              status ===
-              "connecting"
-            }
-            className="rounded-lg bg-violet-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="button button-primary voice-control"
+            onClick={connect}
+            disabled={status === "connecting"}
           >
-            {status ===
-            "connecting"
-              ? "Connecting..."
-              : "Start Voice Agent"}
+            <OpsIcon kind="mic" />
+            {status === "connecting" ? "Connecting..." : "Start Voice Agent"}
           </button>
         )}
       </div>
-
       {error && (
-        <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+        <div className="voice-error" role="alert">
           {error}
         </div>
       )}
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
-
-        {/* Conversation */}
-        <div className="min-h-[220px] rounded-xl border border-white/10 bg-black/20 p-4">
-
-          <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-gray-600">
-            Voice Conversation
-          </p>
-
-          {messages.length ===
-            0 &&
-          !partialTranscript ? (
-            <div className="flex min-h-[160px] items-center justify-center">
-              <p className="max-w-md text-center text-sm text-gray-500">
-                Trigger an incident, start the voice agent, and ask VoxOps to investigate it.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-
-              {messages.map(
-                (
-                  message
-                ) => (
-                  <div
-                    key={
-                      message.id
-                    }
-                    className={
-                      message.role ===
-                      "user"
-                        ? "ml-auto max-w-2xl rounded-xl bg-violet-500/10 p-3"
-                        : "mr-auto max-w-2xl rounded-xl bg-white/5 p-3"
-                    }
-                  >
-                    <p className="mb-1 text-xs uppercase tracking-wider text-gray-500">
-                      {message.role ===
-                      "user"
-                        ? "Engineer"
-                        : "VoxOps"}
-                    </p>
-
-                    <p className="text-sm text-gray-200">
-                      {
-                        message.text
-                      }
-                    </p>
-                  </div>
-                )
-              )}
-
-              {partialTranscript && (
-                <div className="ml-auto max-w-2xl rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
-
-                  <p className="mb-1 text-xs uppercase tracking-wider text-violet-400">
-                    Listening...
-                  </p>
-
-                  <p className="text-sm italic text-gray-400">
-                    {
-                      partialTranscript
-                    }
-                  </p>
-
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Tool Activity */}
-        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-gray-600">
-              Investigation Tools
-            </p>
-
-            <span className="text-xs text-gray-600">
-              {
-                toolActivity.length
-              }{" "}
-              calls
-            </span>
-          </div>
-
-          {toolActivity.length ===
-          0 ? (
-            <div className="flex min-h-[160px] items-center justify-center text-center">
-
-              <p className="max-w-xs text-sm text-gray-600">
-                Tool calls will appear here when VoxOps investigates evidence.
-              </p>
-
-            </div>
-          ) : (
-            <div className="mt-4 space-y-3">
-
-              {toolActivity.map(
-                (
-                  tool,
-                  index
-                ) => (
-                  <div
-                    key={
-                      tool.id
-                    }
-                    className="rounded-lg border border-violet-500/15 bg-violet-500/[0.04] p-3"
-                  >
-
-                    <div className="flex items-center justify-between gap-3">
-
-                      <p className="text-xs font-medium text-violet-400">
-                        {String(
-                          index +
-                            1
-                        ).padStart(
-                          2,
-                          "0"
-                        )}{" "}
-                        {
-                          tool.name
-                        }
-                      </p>
-
-                      <span className="text-[10px] text-gray-600">
-                        {
-                          tool.time
-                        }
-                      </span>
-
-                    </div>
-
-                    <p className="mt-2 text-xs leading-5 text-gray-400">
-                      {
-                        tool.summary
-                      }
-                    </p>
-
-                  </div>
-                )
-              )}
-
-            </div>
-          )}
-        </div>
+      <div className="try-saying">
+        <span className="eyebrow">Try saying</span>
+        <p>&ldquo;{trySaying}&rdquo;</p>
       </div>
-
-      <div className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.04] p-3">
-
-  <p className="text-xs text-emerald-300">
-    Human-controlled operations
-  </p>
-
-  <p className="mt-1 text-xs text-gray-500">
-    VoxOps can investigate incidents and propose recovery actions. State-changing operations execute only after explicit human approval through the Safety Gate.
-  </p>
-
-</div>
+      <div className="voice-transcript">
+        <div className="row-between">
+          <p className="eyebrow">Latest command</p>
+          <span className="micro-label">
+            {partialTranscript ? "Partial transcript" : "Final transcript"}
+          </span>
+        </div>
+        <p
+          className={
+            partialTranscript ? "partial-transcript" : "final-transcript"
+          }
+        >
+          {partialTranscript ||
+            latestUser?.text ||
+            "Your spoken command will appear here."}
+        </p>
+      </div>
+      <details className="conversation-details">
+        <summary>
+          Conversation <span>{messages.length} messages</span>
+        </summary>
+        <div
+          ref={conversationRef}
+          className="conversation-scroll"
+          role="log"
+          aria-label="Voice conversation"
+        >
+          {messages.length === 0 && (
+            <p className="muted">No conversation yet.</p>
+          )}
+          {messages.map((message) => (
+            <div className={`message message-${message.role}`} key={message.id}>
+              <span className="eyebrow">
+                {message.role === "user" ? "You" : "VoxOps"}
+              </span>
+              <p>{message.text}</p>
+            </div>
+          ))}
+        </div>
+      </details>
+      <div className="tool-stream">
+        <div className="row-between">
+          <p className="eyebrow">Live tool execution</p>
+          <span className="micro-label">
+            {toolActivity.length} observed calls
+          </span>
+        </div>
+        {toolActivity.length === 0 ? (
+          <div className="tool-empty">
+            <span className="tool-empty-icon">&gt;_</span>
+            <p>
+              Waiting for an operational command.
+              <br />
+              <span>Actual agent tool calls appear here.</span>
+            </p>
+          </div>
+        ) : (
+          <div
+            className="tool-scroll"
+            role="log"
+            aria-label="Observed tool calls"
+          >
+            {[...toolActivity].reverse().map((tool) => (
+              <article
+                className={`tool-item ${tool.result.ok ? "tool-success" : "tool-blocked"}`}
+                key={tool.id}
+              >
+                <div className="row-between">
+                  <h3>{toolLabels[tool.name] ?? tool.name}</h3>
+                  <StatusBadge tone={tool.result.ok ? "green" : "red"}>
+                    {tool.result.ok ? "Returned" : "Blocked"}
+                  </StatusBadge>
+                </div>
+                <div className="tool-meta">
+                  <code>{tool.name}</code>
+                  <time>{tool.time}</time>
+                </div>
+                <p>{tool.summary}</p>
+                <details>
+                  <summary>Tool details</summary>
+                  <pre>
+                    {JSON.stringify(
+                      { arguments: tool.arguments, result: tool.result },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

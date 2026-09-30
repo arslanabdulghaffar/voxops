@@ -43,3 +43,7 @@ next-env.d.ts
 # Environment variables
 .env*
 docs/demo-script.md
+
+# Safe, documented setup template
+!.env.example
+docs/STAGE8_REVIEW.md
